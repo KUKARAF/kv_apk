@@ -10,6 +10,8 @@ import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
 
+const val BASE_URL = "https://kv.osmosis.page/"
+
 data class ApprovalItem(
     val id: String,
     @SerializedName("api_key_label") val apiKeyLabel: String,
@@ -29,7 +31,7 @@ interface KvApi {
     suspend fun reject(@Path("id") id: String): Response<Unit>
 }
 
-fun buildApi(serverUrl: String, token: String): KvApi {
+fun buildApi(token: String): KvApi {
     val client = OkHttpClient.Builder()
         .addInterceptor(Interceptor { chain ->
             val request = chain.request().newBuilder()
@@ -39,9 +41,8 @@ fun buildApi(serverUrl: String, token: String): KvApi {
         })
         .build()
 
-    val baseUrl = serverUrl.trimEnd('/') + "/"
     return Retrofit.Builder()
-        .baseUrl(baseUrl)
+        .baseUrl(BASE_URL)
         .client(client)
         .addConverterFactory(GsonConverterFactory.create())
         .build()

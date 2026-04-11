@@ -7,7 +7,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import dev.kv.apk.data.Prefs
 import dev.kv.apk.ui.ApprovalsScreen
+import dev.kv.apk.ui.QrScannerScreen
 import dev.kv.apk.ui.SetupScreen
+
+private enum class Screen { SETUP, SCANNING, APPROVALS }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -15,20 +18,31 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 val prefs = remember { Prefs(applicationContext) }
-                var hasCredentials by remember { mutableStateOf(prefs.hasCredentials()) }
+                var screen by remember {
+                    mutableStateOf(if (prefs.hasCredentials()) Screen.APPROVALS else Screen.SETUP)
+                }
 
-                if (hasCredentials) {
-                    ApprovalsScreen(
+                when (screen) {
+                    Screen.SETUP -> SetupScreen(
+                        onScanQr = { screen = Screen.SCANNING },
+                        onSaved = { token ->
+                            prefs.token = token
+                            screen = Screen.APPROVALS
+                        },
+                    )
+                    Screen.SCANNING -> QrScannerScreen(
+                        onScanned = { token ->
+                            prefs.token = token.trim()
+                            screen = Screen.APPROVALS
+                        },
+                        onCancel = { screen = Screen.SETUP },
+                    )
+                    Screen.APPROVALS -> ApprovalsScreen(
                         prefs = prefs,
                         onLogout = {
                             prefs.clear()
-                            hasCredentials = false
-                        }
-                    )
-                } else {
-                    SetupScreen(
-                        prefs = prefs,
-                        onSaved = { hasCredentials = true }
+                            screen = Screen.SETUP
+                        },
                     )
                 }
             }

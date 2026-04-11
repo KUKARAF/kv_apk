@@ -17,15 +17,11 @@ class Prefs(context: Context) {
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
     )
 
-    var serverUrl: String
-        get() = prefs.getString("server_url", "") ?: ""
-        set(v) { prefs.edit().putString("server_url", v).apply() }
-
     var token: String
         get() = prefs.getString("token", "") ?: ""
         set(v) { prefs.edit().putString("token", v).apply() }
 
-    fun hasCredentials() = serverUrl.isNotBlank() && token.isNotBlank()
+    fun hasCredentials() = token.isNotBlank()
 
     fun clear() = prefs.edit().clear().apply()
 }

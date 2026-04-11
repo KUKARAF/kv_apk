@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ApprovalsScreen(prefs: Prefs, onLogout: () -> Unit) {
-    val api = remember { buildApi(prefs.serverUrl, prefs.token) }
+    val api = remember { buildApi(prefs.token) }
     val scope = rememberCoroutineScope()
 
     var approvals by remember { mutableStateOf<List<ApprovalItem>>(emptyList()) }

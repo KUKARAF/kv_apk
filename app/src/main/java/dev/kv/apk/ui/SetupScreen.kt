@@ -2,59 +2,83 @@ package dev.kv.apk.ui
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import dev.kv.apk.data.Prefs
+import dev.kv.apk.data.BASE_URL
 
 @Composable
-fun SetupScreen(prefs: Prefs, onSaved: () -> Unit) {
-    var serverUrl by remember { mutableStateOf(prefs.serverUrl) }
-    var token by remember { mutableStateOf(prefs.token) }
+fun SetupScreen(
+    onScanQr: () -> Unit,
+    onSaved: (token: String) -> Unit,
+) {
+    var showManual by remember { mutableStateOf(false) }
+    var manualToken by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("KV Approver Setup", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(32.dp))
-
-        OutlinedTextField(
-            value = serverUrl,
-            onValueChange = { serverUrl = it },
-            label = { Text("Server URL") },
-            placeholder = { Text("https://kv.example.com") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+        Text("KV Approver", style = MaterialTheme.typography.headlineLarge)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            BASE_URL.trimEnd('/'),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(48.dp))
 
-        OutlinedTextField(
-            value = token,
-            onValueChange = { token = it },
-            label = { Text("Device token") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
+        Text(
+            "Scan the QR code from the admin panel\n(Approvals → Add phone)",
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(24.dp))
 
         Button(
-            onClick = {
-                prefs.serverUrl = serverUrl.trim()
-                prefs.token = token.trim()
-                onSaved()
-            },
-            enabled = serverUrl.isNotBlank() && token.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
+            onClick = onScanQr,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
         ) {
-            Text("Save")
+            Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Scan QR code")
+        }
+
+        Spacer(Modifier.height(24.dp))
+        TextButton(onClick = { showManual = !showManual }) {
+            Text(if (showManual) "Hide manual entry" else "Enter token manually")
+        }
+
+        if (showManual) {
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = manualToken,
+                onValueChange = { manualToken = it },
+                label = { Text("Device token") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = { onSaved(manualToken.trim()) },
+                enabled = manualToken.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Save")
+            }
         }
     }
 }
