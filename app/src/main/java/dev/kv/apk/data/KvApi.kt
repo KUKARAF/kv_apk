@@ -6,6 +6,7 @@ import okhttp3.OkHttpClient
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -15,17 +16,18 @@ const val BASE_URL = "https://kv.osmosis.page/"
 data class ApprovalItem(
     val id: String,
     @SerializedName("api_key_label") val apiKeyLabel: String,
-    @SerializedName("emoji_sequence") val emojiSequence: String,
     @SerializedName("requested_at") val requestedAt: String,
     @SerializedName("expires_at") val expiresAt: String,
 )
+
+data class ApproveRequest(val confirm: String)
 
 interface KvApi {
     @GET("api/admin/approvals")
     suspend fun listApprovals(): List<ApprovalItem>
 
     @POST("api/admin/approvals/{id}/approve")
-    suspend fun approve(@Path("id") id: String): Response<Unit>
+    suspend fun approve(@Path("id") id: String, @Body body: ApproveRequest): Response<Unit>
 
     @POST("api/admin/approvals/{id}/reject")
     suspend fun reject(@Path("id") id: String): Response<Unit>
