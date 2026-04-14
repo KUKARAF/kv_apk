@@ -6,6 +6,7 @@
 
     <application
         android:label="KV Approver"
+        android:icon="@drawable/kv_logo"
         android:theme="@style/Theme.Material3.DayNight.NoActionBar">
         <activity
             android:name=".MainActivity"
