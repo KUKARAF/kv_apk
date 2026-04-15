@@ -48,6 +48,9 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Download logo
+        run: curl -fsSL https://static.layer55.eu/kv/kv_logo.png -o app/src/main/res/drawable/kv_logo.png
+
       - name: Decode keystore
         run: echo "${{ secrets.SIGNING_KEYSTORE }}" | base64 -d > /tmp/release.keystore
 
