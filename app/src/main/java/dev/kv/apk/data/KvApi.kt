@@ -22,6 +22,8 @@ data class ApprovalItem(
 
 data class ApproveRequest(val confirm: String)
 
+data class EmojiEntry(val e: String, val n: String)
+
 interface KvApi {
     @GET("api/admin/approvals")
     suspend fun listApprovals(): List<ApprovalItem>
@@ -31,6 +33,9 @@ interface KvApi {
 
     @POST("api/admin/approvals/{id}/reject")
     suspend fun reject(@Path("id") id: String): Response<Unit>
+
+    @GET("admin/emoji.json")
+    suspend fun getEmojis(): List<EmojiEntry>
 }
 
 fun buildApi(token: String): KvApi {

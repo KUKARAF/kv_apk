@@ -18,32 +18,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.ApprovalItem
 import dev.kv.apk.data.ApproveRequest
+import dev.kv.apk.data.EmojiEntry
 import dev.kv.apk.data.Prefs
 import dev.kv.apk.data.buildApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-
-// Must match EMOJI_POOL in kv_manager/src/keys/generate.rs
-private val EMOJI_POOL: List<Pair<String, String>> = listOf(
-    "🦊" to "fox", "🐬" to "dolphin", "🎸" to "guitar", "🌊" to "wave",
-    "🔥" to "fire", "⚡" to "lightning", "🌈" to "rainbow", "🎯" to "target",
-    "🦋" to "butterfly", "🌙" to "moon", "⭐" to "star", "🎪" to "circus",
-    "🦁" to "lion", "🐉" to "dragon", "🌺" to "hibiscus", "🎨" to "palette",
-    "🔮" to "crystal ball", "🎭" to "theater", "🦄" to "unicorn", "🌸" to "blossom",
-    "🎵" to "music", "🏔" to "mountain", "🌿" to "herb", "🦅" to "eagle",
-    "🐧" to "penguin", "🦀" to "crab", "🌴" to "palm tree", "🎃" to "pumpkin",
-    "🦩" to "flamingo", "🐙" to "octopus", "🌋" to "volcano", "🎠" to "carousel",
-    "🦜" to "parrot", "🐳" to "whale", "🌵" to "cactus", "🎡" to "ferris wheel",
-    "🦢" to "swan", "🐝" to "bee", "🌻" to "sunflower", "🎺" to "trumpet",
-    "🦚" to "peacock", "🐞" to "ladybug", "🌾" to "wheat", "🎻" to "violin",
-    "🦝" to "raccoon", "🍄" to "mushroom", "🎲" to "dice", "🦠" to "microbe",
-    "🌍" to "globe", "🏜" to "desert", "🎳" to "bowling", "🦌" to "deer",
-    "🌠" to "shooting star", "🏝" to "island", "🦏" to "rhinoceros", "🌌" to "galaxy",
-    "🏕" to "camping", "🦓" to "zebra", "🌅" to "sunrise",
-)
-
-// Deduplicated for display (server pool has some duplicates)
-private val UNIQUE_EMOJI_POOL = EMOJI_POOL.distinctBy { it.first }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,9 +31,16 @@ fun ApprovalsScreen(prefs: Prefs, onLogout: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     var approvals by remember { mutableStateOf<List<ApprovalItem>>(emptyList()) }
+    var emojiPool by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshTick by remember { mutableIntStateOf(0) }
+
+    // Load emoji pool once from the server (same source as the backend)
+    LaunchedEffect(Unit) {
+        runCatching { api.getEmojis() }
+            .onSuccess { entries -> emojiPool = entries.map { it.e to it.n } }
+    }
 
     LaunchedEffect(refreshTick) {
         loading = true
@@ -117,6 +103,7 @@ fun ApprovalsScreen(prefs: Prefs, onLogout: () -> Unit) {
                     items(approvals, key = { it.id }) { item ->
                         ApprovalCard(
                             item = item,
+                            emojiPool = emojiPool,
                             onApprove = { confirmString ->
                                 scope.launch {
                                     runCatching { api.approve(item.id, ApproveRequest(confirmString)) }
@@ -148,15 +135,16 @@ fun ApprovalsScreen(prefs: Prefs, onLogout: () -> Unit) {
 @Composable
 private fun ApprovalCard(
     item: ApprovalItem,
+    emojiPool: List<Pair<String, String>>,
     onApprove: (String) -> Unit,
     onReject: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     var pinned by remember { mutableStateOf(listOf<String>()) }
 
-    val filtered = remember(query) {
-        if (query.isBlank()) UNIQUE_EMOJI_POOL
-        else UNIQUE_EMOJI_POOL.filter { (_, name) -> name.contains(query.trim(), ignoreCase = true) }
+    val filtered = remember(query, emojiPool) {
+        if (query.isBlank()) emojiPool
+        else emojiPool.filter { (_, name) -> name.contains(query.trim(), ignoreCase = true) }
     }
 
     Card(
