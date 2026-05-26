@@ -24,6 +24,27 @@ data class ApproveRequest(val confirm: String)
 
 data class EmojiEntry(val e: String, val n: String)
 
+// API Key item returned by GET /api/admin/keys
+data class ApiKeyItem(
+    val id: String,
+    val label: String,
+    @SerializedName("key_type") val keyType: String,
+    val status: String,
+    val scopes: List<ScopeItem>,
+)
+
+data class ScopeItem(
+    val scope: String,
+    val ops: String,
+)
+
+// KV Entry item returned by GET /api/admin/kv
+data class KvEntryItem(
+    val key: String,
+    val value: String,
+    val scope: String,
+)
+
 interface KvApi {
     @GET("api/admin/approvals")
     suspend fun listApprovals(): List<ApprovalItem>
@@ -36,6 +57,12 @@ interface KvApi {
 
     @GET("admin/emoji.json")
     suspend fun getEmojis(): List<EmojiEntry>
+
+    @GET("api/admin/keys")
+    suspend fun listKeys(): List<ApiKeyItem>
+
+    @GET("api/admin/kv")
+    suspend fun listKvEntries(): List<KvEntryItem>
 }
 
 fun buildApi(token: String): KvApi {
