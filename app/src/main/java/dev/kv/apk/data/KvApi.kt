@@ -7,6 +7,7 @@ import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -38,6 +39,12 @@ data class ScopeItem(
     val ops: String,
 )
 
+// Response from POST /api/admin/session-key
+data class CreateKeyResponse(
+    val key: String,
+    val id: String,
+)
+
 // KV Entry item returned by GET /api/admin/kv
 data class KvEntryItem(
     val key: String,
@@ -63,6 +70,12 @@ interface KvApi {
 
     @GET("api/admin/kv")
     suspend fun listKvEntries(): List<KvEntryItem>
+
+    @POST("api/admin/session-key")
+    suspend fun createSessionKey(): Response<CreateKeyResponse>
+
+    @DELETE("api/admin/session-key")
+    suspend fun revokeSessionKey(): Response<Unit>
 }
 
 fun buildApi(token: String): KvApi {

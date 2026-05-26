@@ -47,6 +47,13 @@ class MainActivity : ComponentActivity() {
                     Screen.MAIN -> MainScreen(
                         prefs = prefs,
                         onLogout = {
+                            // Revoke session key first, then clear local token
+                            try {
+                                val api = buildApi(prefs.token)
+                                api.revokeSessionKey()
+                            } catch (_: Exception) {
+                                // Ignore errors during logout - proceed to clear local state
+                            }
                             prefs.clear()
                             screen = Screen.SETUP
                         },
