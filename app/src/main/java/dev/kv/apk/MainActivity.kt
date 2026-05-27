@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import dev.kv.apk.data.ApprovalItem
 import dev.kv.apk.data.Prefs
 import dev.kv.apk.data.buildApi
@@ -16,6 +17,7 @@ import dev.kv.apk.ui.KvEntriesScreen
 import dev.kv.apk.ui.QrScannerScreen
 import dev.kv.apk.ui.SetupScreen
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 
 private enum class Screen { SETUP, SCANNING, MAIN }
 
@@ -49,8 +51,9 @@ class MainActivity : ComponentActivity() {
                         onLogout = {
                             // Revoke session key first, then clear local token
                             try {
-                                val api = buildApi(prefs.token)
-                                api.revokeSessionKey()
+                                runBlocking {
+                                    buildApi(prefs.token).revokeSessionKey()
+                                }
                             } catch (_: Exception) {
                                 // Ignore errors during logout - proceed to clear local state
                             }
