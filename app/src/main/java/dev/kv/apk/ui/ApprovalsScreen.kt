@@ -17,7 +17,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.ApprovalItem
+import dev.kv.apk.data.ApproveDeviceRequest
 import dev.kv.apk.data.ApproveRequest
+import dev.kv.apk.data.DeviceAuthItem
 import dev.kv.apk.data.EmojiEntry
 import dev.kv.apk.data.Prefs
 import dev.kv.apk.data.buildApi
@@ -31,6 +33,7 @@ fun ApprovalsScreen(prefs: Prefs, onLogout: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     var approvals by remember { mutableStateOf<List<ApprovalItem>>(emptyList()) }
+    var deviceAuths by remember { mutableStateOf<List<DeviceAuthItem>>(emptyList()) }
     var emojiPool by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -47,6 +50,7 @@ fun ApprovalsScreen(prefs: Prefs, onLogout: () -> Unit) {
         error = null
         try {
             approvals = api.listApprovals()
+            deviceAuths = api.listDeviceAuthRequests()
         } catch (e: retrofit2.HttpException) {
             if (e.code() == 401) onLogout() else error = "HTTP ${e.code()}"
         } catch (e: Exception) {
@@ -95,11 +99,61 @@ fun ApprovalsScreen(prefs: Prefs, onLogout: () -> Unit) {
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.align(Alignment.Center),
                 )
-                approvals.isEmpty() && !loading -> Text(
+                approvals.isEmpty() && deviceAuths.isEmpty() && !loading -> Text(
                     text = "No pending approvals",
                     modifier = Modifier.align(Alignment.Center),
                 )
                 else -> LazyColumn(Modifier.fillMaxSize()) {
+                    if (deviceAuths.isNotEmpty()) {
+                        item(key = "device-auth-header") {
+                            Text(
+                                text = "Device Auth Requests",
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            )
+                        }
+                        items(deviceAuths, key = { "device-${it.id}" }) { item ->
+                            DeviceAuthCard(
+                                item = item,
+                                onApprove = { label, scopes ->
+                                    scope.launch {
+                                        runCatching {
+                                            api.approveDevice(
+                                                item.id,
+                                                ApproveDeviceRequest(
+                                                    label = label,
+                                                    scopes = scopes,
+                                                    expiresAt = item.expiresAt,
+                                                )
+                                            )
+                                        }
+                                            .onSuccess { resp ->
+                                                if (resp.code() == 401) onLogout()
+                                                else refreshTick++
+                                            }
+                                            .onFailure { /* network error — leave item, user can retry */ }
+                                    }
+                                },
+                                onReject = {
+                                    scope.launch {
+                                        runCatching { api.rejectDevice(item.id) }
+                                            .onSuccess { resp ->
+                                                if (resp.code() == 401) onLogout()
+                                                else refreshTick++
+                                            }
+                                            .onFailure { /* network error */ }
+                                    }
+                                },
+                            )
+                        }
+                        item(key = "approvals-header") {
+                            Text(
+                                text = "API Key Approvals",
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            )
+                        }
+                    }
                     items(approvals, key = { it.id }) { item ->
                         ApprovalCard(
                             item = item,
@@ -256,5 +310,87 @@ private fun ApprovalCard(
                 ) { Text("Reject") }
             }
         }
+    }
+}
+
+@Composable
+private fun DeviceAuthCard(
+    item: DeviceAuthItem,
+    onApprove: (String, List<String>) -> Unit,
+    onReject: () -> Unit,
+) {
+    var showApproveDialog by remember { mutableStateOf(false) }
+    var labelInput by remember { mutableStateOf(item.label ?: "") }
+    var scopesInput by remember { mutableStateOf("default") }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                text = item.label ?: "Unnamed device",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text("Requested: ${item.requestedAt}", style = MaterialTheme.typography.bodySmall)
+            if (item.expiresAt != null) {
+                Text("Expires:   ${item.expiresAt}", style = MaterialTheme.typography.bodySmall)
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { showApproveDialog = true },
+                    modifier = Modifier.weight(1f),
+                ) { Text("Approve") }
+                OutlinedButton(
+                    onClick = onReject,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Reject") }
+            }
+        }
+    }
+
+    if (showApproveDialog) {
+        AlertDialog(
+            onDismissRequest = { showApproveDialog = false },
+            title = { Text("Approve Device") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = labelInput,
+                        onValueChange = { labelInput = it },
+                        label = { Text("Device label") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = scopesInput,
+                        onValueChange = { scopesInput = it },
+                        label = { Text("Scopes (comma-separated)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val scopes = scopesInput.split(",")
+                            .map { it.trim() }
+                            .filter { it.isNotEmpty() }
+                        onApprove(labelInput.ifBlank { item.label ?: "" }, scopes)
+                        showApproveDialog = false
+                    },
+                ) { Text("Approve") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showApproveDialog = false }) { Text("Cancel") }
+            },
+        )
     }
 }

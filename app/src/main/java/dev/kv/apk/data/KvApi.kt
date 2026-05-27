@@ -24,6 +24,19 @@ data class ApproveRequest(val confirm: String)
 
 data class EmojiEntry(val e: String, val n: String)
 
+data class DeviceAuthItem(
+    val id: String,
+    val label: String?,
+    val requestedAt: String,
+    val expiresAt: String?,
+)
+
+data class ApproveDeviceRequest(
+    val label: String,
+    val scopes: List<String>,
+    val expiresAt: String? = null,
+)
+
 interface KvApi {
     @GET("api/admin/approvals")
     suspend fun listApprovals(): List<ApprovalItem>
@@ -33,6 +46,15 @@ interface KvApi {
 
     @POST("api/admin/approvals/{id}/reject")
     suspend fun reject(@Path("id") id: String): Response<Unit>
+
+    @GET("api/admin/device-auth")
+    suspend fun listDeviceAuthRequests(): List<DeviceAuthItem>
+
+    @POST("api/admin/device-auth/{id}/approve")
+    suspend fun approveDevice(@Path("id") id: String, @Body body: ApproveDeviceRequest): Response<Unit>
+
+    @POST("api/admin/device-auth/{id}/reject")
+    suspend fun rejectDevice(@Path("id") id: String): Response<Unit>
 
     @GET("admin/emoji.json")
     suspend fun getEmojis(): List<EmojiEntry>
