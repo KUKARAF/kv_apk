@@ -7,6 +7,7 @@ import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -23,6 +24,33 @@ data class ApprovalItem(
 data class ApproveRequest(val confirm: String)
 
 data class EmojiEntry(val e: String, val n: String)
+
+// API Key item returned by GET /api/admin/keys
+data class ApiKeyItem(
+    val id: String,
+    val label: String,
+    @SerializedName("key_type") val keyType: String,
+    val status: String,
+    val scopes: List<ScopeItem>,
+)
+
+data class ScopeItem(
+    val scope: String,
+    val ops: String,
+)
+
+// Response from POST /api/admin/session-key
+data class CreateKeyResponse(
+    val key: String,
+    val id: String,
+)
+
+// KV Entry item returned by GET /api/admin/kv
+data class KvEntryItem(
+    val key: String,
+    val value: String,
+    val scope: String,
+)
 
 data class DeviceAuthItem(
     val id: String,
@@ -58,6 +86,18 @@ interface KvApi {
 
     @GET("admin/emoji.json")
     suspend fun getEmojis(): List<EmojiEntry>
+
+    @GET("api/admin/keys")
+    suspend fun listKeys(): List<ApiKeyItem>
+
+    @GET("api/admin/kv")
+    suspend fun listKvEntries(): List<KvEntryItem>
+
+    @POST("api/admin/session-key")
+    suspend fun createSessionKey(): Response<CreateKeyResponse>
+
+    @DELETE("api/admin/session-key")
+    suspend fun revokeSessionKey(): Response<Unit>
 }
 
 fun buildApi(token: String): KvApi {
