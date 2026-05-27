@@ -51,7 +51,7 @@ jobs:
       - name: Download logo
         run: |
           mkdir -p app/src/main/res/drawable
-          curl -fsSL https://static.layer55.eu/kv/kv_logo.png -o app/src/main/res/drawable/kv_logo.png
+          curl -fsSL https://static.osmosis.page/kv/kv_logo.png -o app/src/main/res/drawable/kv_logo.png
 
       - name: Decode keystore
         run: echo "${{ secrets.SIGNING_KEYSTORE }}" | base64 -d > /tmp/release.keystore
