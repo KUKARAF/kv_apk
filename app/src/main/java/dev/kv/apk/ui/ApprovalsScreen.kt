@@ -22,18 +22,24 @@ import dev.kv.apk.data.ApproveRequest
 import dev.kv.apk.data.DeviceAuthItem
 import dev.kv.apk.data.EmojiEntry
 import dev.kv.apk.data.Prefs
+import dev.kv.apk.data.SessionRequestItem
 import dev.kv.apk.data.buildApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ApprovalsScreen(prefs: Prefs, onLogout: () -> Unit) {
+fun ApprovalsScreen(
+    prefs: Prefs,
+    onLogout: () -> Unit,
+    focusedSessionRequestId: String? = null,
+) {
     val api = remember { buildApi(prefs.token) }
     val scope = rememberCoroutineScope()
 
     var approvals by remember { mutableStateOf<List<ApprovalItem>>(emptyList()) }
     var deviceAuths by remember { mutableStateOf<List<DeviceAuthItem>>(emptyList()) }
+    var sessionRequests by remember { mutableStateOf<List<SessionRequestItem>>(emptyList()) }
     var emojiPool by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -51,6 +57,7 @@ fun ApprovalsScreen(prefs: Prefs, onLogout: () -> Unit) {
         try {
             approvals = api.listApprovals()
             deviceAuths = api.listDeviceAuthRequests()
+            sessionRequests = api.listSessionRequests()
         } catch (e: retrofit2.HttpException) {
             if (e.code() == 401) onLogout() else error = "HTTP ${e.code()}"
         } catch (e: Exception) {
@@ -99,11 +106,46 @@ fun ApprovalsScreen(prefs: Prefs, onLogout: () -> Unit) {
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.align(Alignment.Center),
                 )
-                approvals.isEmpty() && deviceAuths.isEmpty() && !loading -> Text(
+                approvals.isEmpty() && deviceAuths.isEmpty() && sessionRequests.isEmpty() && !loading -> Text(
                     text = "No pending approvals",
                     modifier = Modifier.align(Alignment.Center),
                 )
                 else -> LazyColumn(Modifier.fillMaxSize()) {
+                    if (sessionRequests.isNotEmpty()) {
+                        item(key = "session-request-header") {
+                            Text(
+                                text = "Session Requests",
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            )
+                        }
+                        items(sessionRequests, key = { "session-req-${it.id}" }) { item ->
+                            SessionRequestCard(
+                                item = item,
+                                highlighted = item.id == focusedSessionRequestId,
+                                onApprove = {
+                                    scope.launch {
+                                        runCatching { api.approveSessionRequest(item.id) }
+                                            .onSuccess { resp ->
+                                                if (resp.code() == 401) onLogout()
+                                                else refreshTick++
+                                            }
+                                            .onFailure { }
+                                    }
+                                },
+                                onReject = {
+                                    scope.launch {
+                                        runCatching { api.rejectSessionRequest(item.id) }
+                                            .onSuccess { resp ->
+                                                if (resp.code() == 401) onLogout()
+                                                else refreshTick++
+                                            }
+                                            .onFailure { }
+                                    }
+                                },
+                            )
+                        }
+                    }
                     if (deviceAuths.isNotEmpty()) {
                         item(key = "device-auth-header") {
                             Text(
@@ -181,6 +223,51 @@ fun ApprovalsScreen(prefs: Prefs, onLogout: () -> Unit) {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionRequestCard(
+    item: SessionRequestItem,
+    highlighted: Boolean,
+    onApprove: () -> Unit,
+    onReject: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        colors = if (highlighted)
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        else
+            CardDefaults.cardColors(),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                text = item.label ?: "Unnamed client",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text("Requested: ${item.requestedAt}", style = MaterialTheme.typography.bodySmall)
+            Text("Expires:   ${item.expiresAt}", style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Approving creates a 15-hour session token.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onApprove,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Approve") }
+                OutlinedButton(
+                    onClick = onReject,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Reject") }
             }
         }
     }

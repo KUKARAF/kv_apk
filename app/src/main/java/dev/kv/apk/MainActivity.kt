@@ -1,5 +1,6 @@
 package dev.kv.apk
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,8 +23,12 @@ import kotlinx.coroutines.runBlocking
 private enum class Screen { SETUP, SCANNING, MAIN }
 
 class MainActivity : ComponentActivity() {
+
+    private var deepLinkSessionRequestId by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleIntent(intent)
         setContent {
             MaterialTheme {
                 val prefs = remember { Prefs(applicationContext) }
@@ -48,6 +53,7 @@ class MainActivity : ComponentActivity() {
                     )
                     Screen.MAIN -> MainScreen(
                         prefs = prefs,
+                        deepLinkSessionRequestId = deepLinkSessionRequestId,
                         onLogout = {
                             // Revoke session key first, then clear local token
                             try {
@@ -65,11 +71,27 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent) {
+        val data = intent.data ?: return
+        if (data.scheme == "kvapp" && data.host == "session-request") {
+            deepLinkSessionRequestId = data.getQueryParameter("id")
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainScreen(prefs: Prefs, onLogout: () -> Unit) {
+private fun MainScreen(
+    prefs: Prefs,
+    onLogout: () -> Unit,
+    deepLinkSessionRequestId: String? = null,
+) {
     val api = remember { buildApi(prefs.token) }
 
     var approvals by remember { mutableStateOf<List<ApprovalItem>>(emptyList()) }
@@ -96,16 +118,25 @@ private fun MainScreen(prefs: Prefs, onLogout: () -> Unit) {
     }
 
     var selectedTabIndex by remember {
-        mutableIntStateOf(if (approvals.isEmpty()) 1 else 0)
+        mutableIntStateOf(if (approvals.isEmpty() && deepLinkSessionRequestId == null) 1 else 0)
     }
 
-    // Update tab selection when approvals change
+    // Navigate to Approvals tab when a deep link arrives
+    LaunchedEffect(deepLinkSessionRequestId) {
+        if (deepLinkSessionRequestId != null) {
+            selectedTabIndex = 0
+        }
+    }
+
+    // Update tab selection when approvals change (but don't override a deep link navigation)
     LaunchedEffect(approvals) {
-        selectedTabIndex = if (approvals.isEmpty()) 1 else 0
+        if (deepLinkSessionRequestId == null) {
+            selectedTabIndex = if (approvals.isEmpty()) 1 else 0
+        }
     }
 
     val tabs = buildList {
-        if (approvals.isNotEmpty() || selectedTabIndex == 0) {
+        if (approvals.isNotEmpty() || selectedTabIndex == 0 || deepLinkSessionRequestId != null) {
             add("Approvals")
         }
         add("API Keys")
@@ -158,7 +189,11 @@ private fun MainScreen(prefs: Prefs, onLogout: () -> Unit) {
             }
 
             when (tabs.getOrNull(selectedTabIndex)) {
-                "Approvals" -> ApprovalsScreen(prefs = prefs, onLogout = onLogout)
+                "Approvals" -> ApprovalsScreen(
+                    prefs = prefs,
+                    onLogout = onLogout,
+                    focusedSessionRequestId = deepLinkSessionRequestId,
+                )
                 "API Keys" -> KeysScreen(prefs = prefs, onLogout = onLogout)
                 "KV Entries" -> KvEntriesScreen(prefs = prefs, onLogout = onLogout)
             }

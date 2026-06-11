@@ -59,6 +59,13 @@ data class DeviceAuthItem(
     val expiresAt: String?,
 )
 
+data class SessionRequestItem(
+    val id: String,
+    val label: String?,
+    @SerializedName("requested_at") val requestedAt: String,
+    @SerializedName("expires_at") val expiresAt: String,
+)
+
 data class ApproveDeviceRequest(
     val label: String,
     val scopes: List<String>,
@@ -83,6 +90,15 @@ interface KvApi {
 
     @POST("api/admin/device-auth/{id}/reject")
     suspend fun rejectDevice(@Path("id") id: String): Response<Unit>
+
+    @GET("api/admin/session-requests")
+    suspend fun listSessionRequests(): List<SessionRequestItem>
+
+    @POST("api/admin/session-requests/{id}/approve")
+    suspend fun approveSessionRequest(@Path("id") id: String): Response<Unit>
+
+    @POST("api/admin/session-requests/{id}/reject")
+    suspend fun rejectSessionRequest(@Path("id") id: String): Response<Unit>
 
     @GET("admin/emoji.json")
     suspend fun getEmojis(): List<EmojiEntry>
