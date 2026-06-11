@@ -22,7 +22,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -105,10 +105,10 @@ fun QrScannerScreen(onScanned: (String) -> Unit, onCancel: () -> Unit) {
 
 @Composable
 private fun CameraPreview(onScanned: (String) -> Unit) {
-    val context = LocalContext.current
-    val lifecycleOwner = context as LifecycleOwner
-    // Guard against firing onScanned multiple times for the same code
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scanned = remember { AtomicBoolean(false) }
+    // Prevent multiple camera bindings if the factory runs more than once during composition
+    val bound = remember { AtomicBoolean(false) }
 
     AndroidView(
         factory = { ctx ->
@@ -117,6 +117,7 @@ private fun CameraPreview(onScanned: (String) -> Unit) {
 
             val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
             cameraProviderFuture.addListener({
+                if (!bound.compareAndSet(false, true)) return@addListener
                 val cameraProvider = cameraProviderFuture.get()
 
                 val preview = Preview.Builder().build().also {
