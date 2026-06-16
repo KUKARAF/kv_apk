@@ -21,6 +21,10 @@ class Prefs(context: Context) {
         get() = prefs.getString("token", "") ?: ""
         set(v) { prefs.edit().putString("token", v).apply() }
 
+    var sessionEmail: String
+        get() = prefs.getString("session_email", "") ?: ""
+        set(v) { prefs.edit().putString("session_email", v).apply() }
+
     fun hasCredentials() = token.isNotBlank()
 
     fun clear() = prefs.edit().clear().apply()

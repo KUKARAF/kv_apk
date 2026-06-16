@@ -1,115 +1,82 @@
 package dev.kv.apk
 
-import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import dev.kv.apk.data.ApprovalItem
 import dev.kv.apk.data.Prefs
 import dev.kv.apk.data.buildApi
 import dev.kv.apk.ui.ApprovalsScreen
+import dev.kv.apk.ui.DevicesScreen
+import dev.kv.apk.ui.HomeScreen
+import dev.kv.apk.ui.HomeTile
 import dev.kv.apk.ui.KeysScreen
 import dev.kv.apk.ui.KvEntriesScreen
-import dev.kv.apk.ui.QrScannerScreen
+import dev.kv.apk.ui.RateLimitsScreen
+import dev.kv.apk.ui.SessionScreen
 import dev.kv.apk.ui.SetupScreen
+import dev.kv.apk.ui.ZeroTrustScreen
+import dev.kv.apk.ui.theme.KvTheme
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
 
-private enum class Screen { SETUP, SCANNING, MAIN }
+private enum class AppScreen { SETUP, MAIN }
 
 class MainActivity : ComponentActivity() {
-
-    private var deepLinkSessionRequestId by mutableStateOf<String?>(null)
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handleIntent(intent)
         setContent {
-            MaterialTheme {
+            KvTheme {
                 val prefs = remember { Prefs(applicationContext) }
-                var screen by remember {
-                    mutableStateOf(if (prefs.hasCredentials()) Screen.MAIN else Screen.SETUP)
+                var appScreen by remember {
+                    mutableStateOf(if (prefs.hasCredentials()) AppScreen.MAIN else AppScreen.SETUP)
                 }
 
-                when (screen) {
-                    Screen.SETUP -> SetupScreen(
-                        onScanQr = { screen = Screen.SCANNING },
-                        onSaved = { token ->
+                when (appScreen) {
+                    AppScreen.SETUP -> SetupScreen(
+                        onRegistered = { token ->
                             prefs.token = token
-                            screen = Screen.MAIN
-                        },
+                            appScreen = AppScreen.MAIN
+                        }
                     )
-                    Screen.SCANNING -> QrScannerScreen(
-                        onScanned = { token ->
-                            prefs.token = token.trim()
-                            screen = Screen.MAIN
-                        },
-                        onCancel = { screen = Screen.SETUP },
-                    )
-                    Screen.MAIN -> MainScreen(
+                    AppScreen.MAIN -> MainContent(
                         prefs = prefs,
-                        deepLinkSessionRequestId = deepLinkSessionRequestId,
                         onLogout = {
-                            // Revoke session key first, then clear local token
-                            try {
-                                runBlocking {
-                                    buildApi(prefs.token).revokeSessionKey()
-                                }
-                            } catch (_: Exception) {
-                                // Ignore errors during logout - proceed to clear local state
-                            }
                             prefs.clear()
-                            screen = Screen.SETUP
+                            appScreen = AppScreen.SETUP
                         },
                     )
                 }
             }
         }
     }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleIntent(intent)
-    }
-
-    private fun handleIntent(intent: Intent) {
-        val data = intent.data ?: return
-        if (data.scheme == "kvapp" && data.host == "session-request") {
-            deepLinkSessionRequestId = data.getQueryParameter("id")
-        }
-    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainScreen(
+private fun MainContent(
     prefs: Prefs,
     onLogout: () -> Unit,
-    deepLinkSessionRequestId: String? = null,
 ) {
     val api = remember { buildApi(prefs.token) }
+    var screen by remember { mutableStateOf("home") }
 
     var approvals by remember { mutableStateOf<List<ApprovalItem>>(emptyList()) }
-    var loadingApprovals by remember { mutableStateOf(false) }
     var refreshTick by remember { mutableIntStateOf(0) }
 
-    // Keep approvals in sync even when on other tabs
     LaunchedEffect(refreshTick) {
-        loadingApprovals = true
         try {
             approvals = api.listApprovals()
         } catch (e: retrofit2.HttpException) {
             if (e.code() == 401) onLogout()
-        } catch (_: Exception) { }
-        finally { loadingApprovals = false }
+        } catch (_: Exception) {}
     }
 
-    // Auto-refresh every 30 seconds
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000)
@@ -117,86 +84,69 @@ private fun MainScreen(
         }
     }
 
-    var selectedTabIndex by remember {
-        mutableIntStateOf(if (approvals.isEmpty() && deepLinkSessionRequestId == null) 1 else 0)
-    }
+    val back: () -> Unit = { screen = "home" }
 
-    // Navigate to Approvals tab when a deep link arrives
-    LaunchedEffect(deepLinkSessionRequestId) {
-        if (deepLinkSessionRequestId != null) {
-            selectedTabIndex = 0
-        }
-    }
+    when (screen) {
+        "home" -> HomeScreen(
+            sessionEmail = prefs.sessionEmail,
+            tiles = listOf(
+                HomeTile(
+                    n = "01", title = "KV ENTRIES",
+                    desc = "secrets manager",
+                    onClick = { screen = "kv" },
+                ),
+                HomeTile(
+                    n = "02", title = "API KEYS",
+                    desc = "manage access keys",
+                    onClick = { screen = "apikeys" },
+                ),
+                HomeTile(
+                    n = "03", title = "APPROVALS",
+                    desc = "${approvals.size} pending",
+                    alert = approvals.isNotEmpty(),
+                    onClick = { screen = "approvals" },
+                ),
+                HomeTile(
+                    n = "04", title = "DEVICES",
+                    desc = "registered devices",
+                    onClick = { screen = "devices" },
+                ),
+                HomeTile(
+                    n = "05", title = "ZERO TRUST",
+                    desc = "fido2 hardware keys",
+                    onClick = { screen = "zerotrust" },
+                ),
+                HomeTile(
+                    n = "06", title = "RATE LIMITS",
+                    desc = "blocked ips + log",
+                    onClick = { screen = "ratelimits" },
+                ),
+                HomeTile(
+                    n = "07", title = "SESSION",
+                    desc = "signed in",
+                    onClick = { screen = "session" },
+                ),
+            ),
+        )
 
-    // Update tab selection when approvals change (but don't override a deep link navigation)
-    LaunchedEffect(approvals) {
-        if (deepLinkSessionRequestId == null) {
-            selectedTabIndex = if (approvals.isEmpty()) 1 else 0
-        }
-    }
+        "kv" -> KvEntriesScreen(api = api, onBack = back, onLogout = onLogout)
 
-    val tabs = buildList {
-        if (approvals.isNotEmpty() || selectedTabIndex == 0 || deepLinkSessionRequestId != null) {
-            add("Approvals")
-        }
-        add("API Keys")
-        add("KV Entries")
-    }
+        "apikeys" -> KeysScreen(api = api, onBack = back, onLogout = onLogout)
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("KV Admin") },
-                actions = {
-                    if (loadingApprovals) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .size(24.dp)
-                                .padding(end = 8.dp),
-                            strokeWidth = 2.dp,
-                        )
-                    }
-                    TextButton(onClick = onLogout) {
-                        Text("Logout")
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            TabRow(selectedTabIndex = selectedTabIndex) {
-                tabs.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedTabIndex == index,
-                        onClick = { selectedTabIndex = index },
-                        text = {
-                            if (title == "Approvals" && approvals.isNotEmpty()) {
-                                BadgedBox(badge = {
-                                    Badge { Text(approvals.size.toString()) }
-                                }) {
-                                    Text(title)
-                                }
-                            } else {
-                                Text(title)
-                            }
-                        },
-                    )
-                }
-            }
+        "approvals" -> ApprovalsScreen(
+            api = api,
+            approvals = approvals,
+            onBack = back,
+            onLogout = onLogout,
+            onApprovalChanged = { refreshTick++ },
+        )
 
-            when (tabs.getOrNull(selectedTabIndex)) {
-                "Approvals" -> ApprovalsScreen(
-                    prefs = prefs,
-                    onLogout = onLogout,
-                    focusedSessionRequestId = deepLinkSessionRequestId,
-                )
-                "API Keys" -> KeysScreen(prefs = prefs, onLogout = onLogout)
-                "KV Entries" -> KvEntriesScreen(prefs = prefs, onLogout = onLogout)
-            }
-        }
+        "devices" -> DevicesScreen(api = api, onBack = back, onLogout = onLogout)
+
+        "zerotrust" -> ZeroTrustScreen(api = api, onBack = back, onLogout = onLogout)
+
+        "ratelimits" -> RateLimitsScreen(api = api, onBack = back, onLogout = onLogout)
+
+        "session" -> SessionScreen(api = api, onBack = back, onLogout = onLogout)
     }
 }
