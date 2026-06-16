@@ -247,7 +247,7 @@ fun KvEntriesScreen(
                     )
                 }
 
-                items(filtered, key = { it.key }) { entry ->
+                items(filtered, key = { "${it.key}|${it.scope}" }) { entry ->
                     EntryRow(entry)
                 }
 
@@ -383,7 +383,7 @@ private fun EntryRow(item: KvEntryItem) {
                 )
             }
         }
-        if (item.scope.isNotEmpty()) {
+        if (!item.scope.isNullOrEmpty()) {
             KvChip(item.scope)
         } else {
             Text("+ scope", fontFamily = VT323, fontSize = 15.sp, color = KvFaint)

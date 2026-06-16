@@ -51,8 +51,8 @@ data class CreateKeyResponse(
 
 data class KvEntryItem(
     val key: String,
-    val value: String,
-    val scope: String,
+    val value: String? = null,
+    val scope: String? = null,
     val zt: Boolean = false,
 )
 
