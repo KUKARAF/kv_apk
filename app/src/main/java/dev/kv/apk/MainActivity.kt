@@ -2,7 +2,12 @@ package dev.kv.apk
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -23,6 +28,7 @@ import dev.kv.apk.ui.RateLimitsScreen
 import dev.kv.apk.ui.SessionScreen
 import dev.kv.apk.ui.SetupScreen
 import dev.kv.apk.ui.ZeroTrustScreen
+import dev.kv.apk.ui.theme.KvBg
 import dev.kv.apk.ui.theme.KvTheme
 import kotlinx.coroutines.delay
 
@@ -84,8 +90,16 @@ private fun MainContent(
         }
     }
 
+    BackHandler(enabled = screen != "home") { screen = "home" }
+
     val back: () -> Unit = { screen = "home" }
 
+    Box(
+        modifier = androidx.compose.ui.Modifier
+            .fillMaxSize()
+            .background(KvBg)
+            .systemBarsPadding(),
+    ) {
     when (screen) {
         "home" -> HomeScreen(
             sessionEmail = prefs.sessionEmail,
@@ -148,5 +162,6 @@ private fun MainContent(
         "ratelimits" -> RateLimitsScreen(api = api, onBack = back, onLogout = onLogout)
 
         "session" -> SessionScreen(api = api, onBack = back, onLogout = onLogout)
+    }
     }
 }
