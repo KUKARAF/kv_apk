@@ -130,10 +130,12 @@ fun KvButtonOutline(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     color: Color = KvAccent,
 ) {
     OutlinedButton(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier,
         shape = RoundedCornerShape(2.dp),
         colors = ButtonDefaults.outlinedButtonColors(
