@@ -1,9 +1,9 @@
 package dev.kv.apk.ui
 
-import android.content.Intent
-import android.net.Uri
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,33 +28,54 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.kv.apk.data.DeviceAuthRequest
-import dev.kv.apk.data.buildDeviceAuthApi
+import dev.kv.apk.data.DeviceRegistrationRequest
+import dev.kv.apk.data.buildApi
 import dev.kv.apk.ui.theme.KvAccent
 import dev.kv.apk.ui.theme.KvBg
 import dev.kv.apk.ui.theme.KvDanger
 import dev.kv.apk.ui.theme.KvDim
 import dev.kv.apk.ui.theme.KvFaint
-import dev.kv.apk.ui.theme.KvInk
 import dev.kv.apk.ui.theme.PressStart2P
 import dev.kv.apk.ui.theme.VT323
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.security.KeyPairGenerator
+import java.security.KeyStore
+import java.security.spec.ECGenParameterSpec
+
+private const val KEY_ALIAS = "kv_device_key"
+
+private fun getOrCreatePublicKeyBase64(): String {
+    val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    if (!ks.containsAlias(KEY_ALIAS)) {
+        KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
+            initialize(
+                KeyGenParameterSpec.Builder(
+                    KEY_ALIAS,
+                    KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY,
+                )
+                    .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
+                    .setDigests(KeyProperties.DIGEST_SHA256)
+                    .build()
+            )
+            generateKeyPair()
+        }
+    }
+    val pub = ks.getCertificate(KEY_ALIAS).publicKey
+    return Base64.encodeToString(pub.encoded, Base64.NO_WRAP)
+}
 
 @Composable
 fun SetupScreen(onRegistered: (token: String) -> Unit) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-
     var deviceName by remember { mutableStateOf("") }
+    var token by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var approvalUrl by remember { mutableStateOf<String?>(null) }
-    var requestId by remember { mutableStateOf<String?>(null) }
-    var polling by remember { mutableStateOf(false) }
+
+    val publicKey = remember { runCatching { getOrCreatePublicKeyBase64() }.getOrElse { "" } }
 
     Box(
         modifier = Modifier
@@ -85,175 +106,108 @@ fun SetupScreen(onRegistered: (token: String) -> Unit) {
 
             Spacer(Modifier.height(20.dp))
 
-            if (approvalUrl == null) {
-                KvCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(15.dp)) {
-                        KvSectionTitle("DEVICE NAME")
-                        KvLabel("NAME")
-                        KvInput(
-                            value = deviceName,
-                            onValueChange = { deviceName = it },
-                            placeholder = "pixel pro",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 15.dp),
+            KvCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(15.dp)) {
+                    KvSectionTitle("DEVICE IDENTITY")
+                    Text(
+                        "A key pair has been generated on this device. The private key never leaves your phone.",
+                        fontFamily = VT323,
+                        fontSize = 15.sp,
+                        color = KvDim,
+                        modifier = Modifier.padding(bottom = 14.dp),
+                    )
+                    KvLabel("PUBLIC KEY")
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF070D07), RoundedCornerShape(2.dp))
+                            .padding(10.dp),
+                    ) {
+                        Text(
+                            if (publicKey.length > 64) publicKey.take(32) + "…" + publicKey.takeLast(16)
+                            else publicKey,
+                            fontFamily = VT323,
+                            fontSize = 13.sp,
+                            color = KvAccent,
                         )
-
-                        if (error != null) {
-                            Text(
-                                error!!,
-                                fontFamily = VT323,
-                                fontSize = 15.sp,
-                                color = KvDanger,
-                                modifier = Modifier.padding(bottom = 10.dp),
-                            )
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            KvButton(
-                                text = "START",
-                                enabled = deviceName.isNotBlank() && !loading,
-                                onClick = {
-                                    scope.launch {
-                                        loading = true
-                                        error = null
-                                        try {
-                                            val api = buildDeviceAuthApi()
-                                            val resp = api.createRequest(
-                                                DeviceAuthRequest(label = deviceName.trim())
-                                            )
-                                            requestId = resp.id
-                                            approvalUrl = resp.url
-                                        } catch (e: Exception) {
-                                            error = e.message ?: "Failed to create request"
-                                        } finally {
-                                            loading = false
-                                        }
-                                    }
-                                },
-                            )
-                            if (loading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.height(20.dp),
-                                    color = KvAccent,
-                                    strokeWidth = 2.dp,
-                                )
-                            }
-                        }
                     }
                 }
-            } else {
-                KvCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(15.dp)) {
-                        KvSectionTitle("AWAITING APPROVAL")
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            KvCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(15.dp)) {
+                    KvSectionTitle("DEVICE NAME")
+                    KvLabel("NAME")
+                    KvInput(
+                        value = deviceName,
+                        onValueChange = { deviceName = it },
+                        placeholder = "pixel pro",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 15.dp),
+                    )
+
+                    KvLabel("BEARER TOKEN")
+                    KvInput(
+                        value = token,
+                        onValueChange = { token = it },
+                        placeholder = "paste token from web admin",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 15.dp),
+                        visualTransformation = PasswordVisualTransformation(),
+                        fontSize = 17,
+                    )
+
+                    if (error != null) {
                         Text(
-                            "Open this link in your browser and approve the request from the admin dashboard.",
+                            error!!,
                             fontFamily = VT323,
-                            fontSize = 16.sp,
-                            color = KvDim,
-                            lineHeight = 20.sp,
-                            modifier = Modifier.padding(bottom = 14.dp),
+                            fontSize = 15.sp,
+                            color = KvDanger,
+                            modifier = Modifier.padding(bottom = 10.dp),
                         )
+                    }
 
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFF070D07), RoundedCornerShape(2.dp))
-                                .border(1.dp, KvFaint, RoundedCornerShape(2.dp))
-                                .padding(10.dp),
-                        ) {
-                            Text(
-                                approvalUrl!!,
-                                fontFamily = VT323,
-                                fontSize = 13.sp,
-                                color = KvAccent,
-                                lineHeight = 17.sp,
-                            )
-                        }
-
-                        Spacer(Modifier.height(14.dp))
-
-                        if (error != null) {
-                            Text(
-                                error!!,
-                                fontFamily = VT323,
-                                fontSize = 15.sp,
-                                color = KvDanger,
-                                modifier = Modifier.padding(bottom = 10.dp),
-                            )
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            KvButton(
-                                text = "OPEN",
-                                onClick = {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(approvalUrl))
-                                    context.startActivity(intent)
-                                },
-                            )
-
-                            KvButtonOutline(
-                                text = if (polling) "POLLING…" else "CHECK",
-                                enabled = !polling,
-                                onClick = {
-                                    scope.launch {
-                                        polling = true
-                                        error = null
-                                        try {
-                                            val api = buildDeviceAuthApi()
-                                            val status = api.pollStatus(requestId!!)
-                                            when (status.status) {
-                                                "approved" -> {
-                                                    val key = status.apiKey
-                                                    if (key != null) {
-                                                        onRegistered(key)
-                                                    } else {
-                                                        error = "approved but no key returned"
-                                                    }
-                                                }
-                                                "rejected" -> error = "request was rejected"
-                                                "delivered" -> error = "key already delivered — start over"
-                                                else -> error = "status: ${status.status} — not approved yet"
-                                            }
-                                        } catch (e: Exception) {
-                                            error = e.message ?: "poll failed"
-                                        } finally {
-                                            polling = false
-                                        }
-                                    }
-                                },
-                            )
-                        }
-
-                        Spacer(Modifier.height(10.dp))
-                        KvButtonOutline(
-                            text = "START OVER",
-                            color = KvDim,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        KvButton(
+                            text = "REGISTER",
+                            enabled = deviceName.isNotBlank() && token.isNotBlank() && !loading && publicKey.isNotEmpty(),
                             onClick = {
-                                approvalUrl = null
-                                requestId = null
-                                error = null
+                                scope.launch {
+                                    loading = true
+                                    error = null
+                                    try {
+                                        val resp = buildApi(token.trim()).registerDevice(
+                                            DeviceRegistrationRequest(
+                                                name = deviceName.trim(),
+                                                publicKey = publicKey,
+                                            )
+                                        )
+                                        if (resp.isSuccessful) {
+                                            onRegistered(token.trim())
+                                        } else {
+                                            error = "HTTP ${resp.code()}"
+                                        }
+                                    } catch (e: Exception) {
+                                        error = e.message ?: "Registration failed"
+                                    } finally {
+                                        loading = false
+                                    }
+                                }
                             },
                         )
-                    }
-                }
-
-                // Auto-poll every 5 seconds while on this screen
-                if (!polling) {
-                    androidx.compose.runtime.LaunchedEffect(requestId) {
-                        while (true) {
-                            delay(5_000)
-                            try {
-                                val api = buildDeviceAuthApi()
-                                val status = api.pollStatus(requestId!!)
-                                if (status.status == "approved" && status.apiKey != null) {
-                                    onRegistered(status.apiKey)
-                                    break
-                                }
-                            } catch (_: Exception) {}
+                        if (loading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.height(20.dp),
+                                color = KvAccent,
+                                strokeWidth = 2.dp,
+                            )
                         }
                     }
                 }

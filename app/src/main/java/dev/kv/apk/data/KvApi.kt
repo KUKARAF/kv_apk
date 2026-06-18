@@ -127,20 +127,12 @@ data class CreateApiKeyRequest(
     val scopes: List<ScopeRule> = emptyList(),
 )
 
-data class DeviceAuthRequest(
-    val label: String? = null,
+data class DeviceRegistrationRequest(
+    val name: String,
+    @SerializedName("public_key") val publicKey: String,
 )
 
-data class DeviceAuthResponse(
-    val id: String,
-    val url: String,
-    @SerializedName("expires_at") val expiresAt: String,
-)
-
-data class DeviceAuthStatusResponse(
-    val status: String,
-    @SerializedName("api_key") val apiKey: String? = null,
-)
+data class DeviceRegistrationResponse(val id: String)
 
 interface KvApi {
     @GET("api/admin/approvals")
@@ -199,14 +191,9 @@ interface KvApi {
 
     @DELETE("api/admin/session-key")
     suspend fun revokeSessionKey(): Response<Unit>
-}
 
-interface DeviceAuthApi {
-    @POST("api/device-auth")
-    suspend fun createRequest(@Body body: DeviceAuthRequest): DeviceAuthResponse
-
-    @GET("api/device-auth/{id}/status")
-    suspend fun pollStatus(@Path("id") id: String): DeviceAuthStatusResponse
+    @POST("api/devices")
+    suspend fun registerDevice(@Body body: DeviceRegistrationRequest): Response<DeviceRegistrationResponse>
 }
 
 fun buildApi(token: String): KvApi {
@@ -227,9 +214,3 @@ fun buildApi(token: String): KvApi {
         .create(KvApi::class.java)
 }
 
-fun buildDeviceAuthApi(): DeviceAuthApi =
-    Retrofit.Builder()
-        .baseUrl(BASE_URL)
-        .addConverterFactory(GsonConverterFactory.create())
-        .build()
-        .create(DeviceAuthApi::class.java)
