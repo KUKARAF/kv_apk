@@ -202,7 +202,7 @@ interface KvApi {
 }
 
 interface DeviceAuthApi {
-    @POST("api/device-auth/")
+    @POST("api/device-auth")
     suspend fun createRequest(@Body body: DeviceAuthRequest): DeviceAuthResponse
 
     @GET("api/device-auth/{id}/status")
