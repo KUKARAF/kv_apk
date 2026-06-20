@@ -1,7 +1,5 @@
 package dev.kv.apk.ui
 
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -28,10 +26,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.DeviceRegistrationRequest
+import dev.kv.apk.data.Prefs
 import dev.kv.apk.data.buildApi
 import dev.kv.apk.ui.theme.KvAccent
 import dev.kv.apk.ui.theme.KvBg
@@ -42,40 +40,39 @@ import dev.kv.apk.ui.theme.PressStart2P
 import dev.kv.apk.ui.theme.VT323
 import kotlinx.coroutines.launch
 import java.security.KeyPairGenerator
-import java.security.KeyStore
 import java.security.spec.ECGenParameterSpec
 
-private const val KEY_ALIAS = "kv_device_key"
+private fun generateOrLoadKeyPair(prefs: Prefs): String {
+    if (prefs.hasDeviceKey()) return prefs.devicePubKeySpki
 
-private fun getOrCreatePublicKeyBase64(): String {
-    val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-    if (!ks.containsAlias(KEY_ALIAS)) {
-        KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
-            initialize(
-                KeyGenParameterSpec.Builder(
-                    KEY_ALIAS,
-                    KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY,
-                )
-                    .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
-                    .setDigests(KeyProperties.DIGEST_SHA256)
-                    .build()
-            )
-            generateKeyPair()
-        }
-    }
-    val pub = ks.getCertificate(KEY_ALIAS).publicKey
-    return Base64.encodeToString(pub.encoded, Base64.NO_WRAP)
+    val kpg = KeyPairGenerator.getInstance("EC")
+    kpg.initialize(ECGenParameterSpec("secp256r1"))
+    val keyPair = kpg.generateKeyPair()
+
+    prefs.devicePrivKeyPkcs8 = Base64.encodeToString(keyPair.private.encoded, Base64.NO_WRAP)
+    prefs.devicePubKeySpki = Base64.encodeToString(keyPair.public.encoded, Base64.NO_WRAP)
+
+    return prefs.devicePubKeySpki
 }
 
 @Composable
-fun SetupScreen(onRegistered: (token: String) -> Unit) {
+fun SetupScreen(prefs: Prefs, onRegistered: (token: String) -> Unit) {
     val scope = rememberCoroutineScope()
     var deviceName by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var showScanner by remember { mutableStateOf(false) }
 
-    val publicKey = remember { runCatching { getOrCreatePublicKeyBase64() }.getOrElse { "" } }
+    val publicKey = remember { runCatching { generateOrLoadKeyPair(prefs) }.getOrElse { "" } }
+
+    if (showScanner) {
+        QrScannerScreen(
+            onScanned = { scanned -> token = scanned; showScanner = false },
+            onCancel = { showScanner = false },
+        )
+        return
+    }
 
     Box(
         modifier = Modifier
@@ -149,16 +146,11 @@ fun SetupScreen(onRegistered: (token: String) -> Unit) {
                             .padding(bottom = 15.dp),
                     )
 
-                    KvLabel("BEARER TOKEN")
-                    KvInput(
-                        value = token,
-                        onValueChange = { token = it },
-                        placeholder = "paste token from web admin",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 15.dp),
-                        visualTransformation = PasswordVisualTransformation(),
-                        fontSize = 17,
+                    KvLabel("AUTHORISATION")
+                    KvButton(
+                        text = if (token.isNotBlank()) "TOKEN SCANNED ✓" else "SCAN QR CODE",
+                        enabled = !loading,
+                        onClick = { showScanner = true },
                     )
 
                     if (error != null) {
@@ -187,9 +179,11 @@ fun SetupScreen(onRegistered: (token: String) -> Unit) {
                                             DeviceRegistrationRequest(
                                                 name = deviceName.trim(),
                                                 publicKey = publicKey,
+                                                keyType = "p256",
                                             )
                                         )
                                         if (resp.isSuccessful) {
+                                            prefs.deviceId = resp.body()!!.id
                                             onRegistered(token.trim())
                                         } else {
                                             error = "HTTP ${resp.code()}"

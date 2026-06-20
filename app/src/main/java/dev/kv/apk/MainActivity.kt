@@ -41,11 +41,14 @@ class MainActivity : ComponentActivity() {
             KvTheme {
                 val prefs = remember { Prefs(applicationContext) }
                 var appScreen by remember {
-                    mutableStateOf(if (prefs.hasCredentials()) AppScreen.MAIN else AppScreen.SETUP)
+                    mutableStateOf(
+                        if (prefs.hasCredentials() && prefs.hasDeviceKey()) AppScreen.MAIN else AppScreen.SETUP
+                    )
                 }
 
                 when (appScreen) {
                     AppScreen.SETUP -> SetupScreen(
+                        prefs = prefs,
                         onRegistered = { token ->
                             prefs.token = token
                             appScreen = AppScreen.MAIN
@@ -143,7 +146,7 @@ private fun MainContent(
             ),
         )
 
-        "kv" -> KvEntriesScreen(api = api, onBack = back, onLogout = onLogout)
+        "kv" -> KvEntriesScreen(api = api, prefs = prefs, onBack = back, onLogout = onLogout)
 
         "apikeys" -> KeysScreen(api = api, onBack = back, onLogout = onLogout)
 

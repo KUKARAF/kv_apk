@@ -1,5 +1,6 @@
 package dev.kv.apk.ui
 
+import android.util.Base64
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,7 +34,10 @@ import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.CreateKvRequest
 import dev.kv.apk.data.KvApi
 import dev.kv.apk.data.KvEntryItem
+import dev.kv.apk.data.Prefs
+import dev.kv.apk.ui.theme.KvAccent
 import dev.kv.apk.ui.theme.KvBg
+import dev.kv.apk.ui.theme.KvDanger
 import dev.kv.apk.ui.theme.KvDim
 import dev.kv.apk.ui.theme.KvFaint
 import dev.kv.apk.ui.theme.KvInk
@@ -40,10 +45,120 @@ import dev.kv.apk.ui.theme.KvOrange
 import dev.kv.apk.ui.theme.PressStart2P
 import dev.kv.apk.ui.theme.VT323
 import kotlinx.coroutines.launch
+import java.security.KeyFactory
+import java.security.spec.PKCS8EncodedKeySpec
+import java.security.spec.X509EncodedKeySpec
+import javax.crypto.Cipher
+import javax.crypto.KeyAgreement
+import javax.crypto.Mac
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
+
+// HKDF-SHA256
+
+private fun hkdfExtract(salt: ByteArray, ikm: ByteArray): ByteArray {
+    val mac = Mac.getInstance("HmacSHA256")
+    mac.init(SecretKeySpec(salt, "HmacSHA256"))
+    return mac.doFinal(ikm)
+}
+
+private fun hkdfExpand(prk: ByteArray, info: ByteArray, length: Int): ByteArray {
+    val mac = Mac.getInstance("HmacSHA256")
+    mac.init(SecretKeySpec(prk, "HmacSHA256"))
+    val result = ByteArray(length)
+    var t = ByteArray(0)
+    var offset = 0
+    var counter = 1
+    while (offset < length) {
+        mac.update(t); mac.update(info); mac.update(counter.toByte())
+        t = mac.doFinal()
+        val len = minOf(t.size, length - offset)
+        t.copyInto(result, offset, 0, len)
+        offset += len; counter++
+    }
+    return result
+}
+
+private fun hkdf(secret: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray =
+    hkdfExpand(hkdfExtract(salt, secret), info, length)
+
+// AES-256-GCM decrypt
+
+private fun aesGcmDecrypt(key: ByteArray, nonce: ByteArray, ciphertext: ByteArray, aad: ByteArray): ByteArray {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, nonce))
+    cipher.updateAAD(aad)
+    return cipher.doFinal(ciphertext)
+}
+
+// P-256 SPKI header (26 bytes): prepend before the 65-byte uncompressed EC point
+
+private val P256_SPKI_HEADER = byteArrayOf(
+    0x30, 0x59.toByte(),
+    0x30, 0x13,
+    0x06, 0x07, 0x2a, 0x86.toByte(), 0x48, 0xce.toByte(), 0x3d, 0x02, 0x01,
+    0x06, 0x08, 0x2a, 0x86.toByte(), 0x48, 0xce.toByte(), 0x3d, 0x03, 0x01, 0x07,
+    0x03, 0x42, 0x00,
+)
+
+private fun decryptDeviceKv(
+    privKeyPkcs8B64: String,
+    nonce: String,
+    ciphertext: String,
+    aad: String,
+    ephemeralPub: String,
+    dekNonce: String,
+    encryptedDek: String,
+): String {
+    val kf = KeyFactory.getInstance("EC")
+
+    // Reconstruct private key
+    val myPrivKey = kf.generatePrivate(
+        PKCS8EncodedKeySpec(Base64.decode(privKeyPkcs8B64, Base64.DEFAULT))
+    )
+
+    // Parse ephemeral public key: raw 65-byte uncompressed point → wrap in SPKI
+    val rawEphPub = Base64.decode(ephemeralPub, Base64.DEFAULT)
+    val spki = P256_SPKI_HEADER + rawEphPub
+    val ephPubKey = kf.generatePublic(X509EncodedKeySpec(spki))
+
+    // ECDH
+    val ka = KeyAgreement.getInstance("ECDH")
+    ka.init(myPrivKey)
+    ka.doPhase(ephPubKey, true)
+    val sharedSecret = ka.generateSecret() // 32-byte x-coordinate for P-256
+
+    // HKDF → wrap key
+    val wrapKey = hkdf(
+        secret = sharedSecret,
+        salt = ByteArray(32),
+        info = "kv-device-wrap".toByteArray(Charsets.UTF_8),
+        length = 32,
+    )
+
+    // Unwrap DEK
+    val dek = aesGcmDecrypt(
+        key = wrapKey,
+        nonce = Base64.decode(dekNonce, Base64.DEFAULT),
+        ciphertext = Base64.decode(encryptedDek, Base64.DEFAULT),
+        aad = ByteArray(0),
+    )
+
+    // Decrypt body
+    val plaintext = aesGcmDecrypt(
+        key = dek,
+        nonce = Base64.decode(nonce, Base64.DEFAULT),
+        ciphertext = Base64.decode(ciphertext, Base64.DEFAULT),
+        aad = Base64.decode(aad, Base64.DEFAULT),
+    )
+
+    return String(plaintext, Charsets.UTF_8)
+}
 
 @Composable
 fun KvEntriesScreen(
     api: KvApi,
+    prefs: Prefs,
     onBack: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -68,6 +183,10 @@ fun KvEntriesScreen(
 
     var importText by remember { mutableStateOf("") }
     var importScope by remember { mutableStateOf("") }
+
+    // Decrypted values: key → plaintext (or error string)
+    var decryptedValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var decryptingKey by remember { mutableStateOf<String?>(null) }
 
     fun loadEntries() {
         scope.launch {
@@ -248,7 +367,40 @@ fun KvEntriesScreen(
                 }
 
                 items(filtered, key = { "${it.key}|${it.scope}" }) { entry ->
-                    EntryRow(entry)
+                    EntryRow(
+                        item = entry,
+                        decryptedValue = decryptedValues[entry.key],
+                        isDecrypting = decryptingKey == entry.key,
+                        canDecrypt = prefs.hasDeviceKey(),
+                        onDecrypt = {
+                            scope.launch {
+                                decryptingKey = entry.key
+                                try {
+                                    val payload = api.getDeviceKv(prefs.deviceId, entry.key)
+                                    val plaintext = decryptDeviceKv(
+                                        privKeyPkcs8B64 = prefs.devicePrivKeyPkcs8,
+                                        nonce = payload.nonce,
+                                        ciphertext = payload.ciphertext,
+                                        aad = payload.aad,
+                                        ephemeralPub = payload.recipient.ephemeralPub,
+                                        dekNonce = payload.recipient.dekNonce,
+                                        encryptedDek = payload.recipient.encryptedDek,
+                                    )
+                                    decryptedValues = decryptedValues + (entry.key to plaintext)
+                                } catch (e: retrofit2.HttpException) {
+                                    if (e.code() == 401) onLogout()
+                                    else decryptedValues = decryptedValues + (entry.key to "error ${e.code()}")
+                                } catch (e: Exception) {
+                                    decryptedValues = decryptedValues + (entry.key to "decrypt failed: ${e.message}")
+                                } finally {
+                                    decryptingKey = null
+                                }
+                            }
+                        },
+                        onDismissDecrypted = {
+                            decryptedValues = decryptedValues - entry.key
+                        },
+                    )
                 }
 
                 item {
@@ -359,36 +511,120 @@ fun KvEntriesScreen(
 }
 
 @Composable
-private fun EntryRow(item: KvEntryItem) {
-    Row(
+private fun EntryRow(
+    item: KvEntryItem,
+    decryptedValue: String?,
+    isDecrypting: Boolean,
+    canDecrypt: Boolean,
+    onDecrypt: () -> Unit,
+    onDismissDecrypted: () -> Unit,
+) {
+    // Dialog showing the decrypted plaintext
+    if (decryptedValue != null) {
+        AlertDialog(
+            onDismissRequest = onDismissDecrypted,
+            title = {
+                Text(
+                    item.key,
+                    fontFamily = PressStart2P,
+                    fontSize = 9.sp,
+                    color = KvAccent,
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        "PLAINTEXT",
+                        fontFamily = PressStart2P,
+                        fontSize = 7.sp,
+                        color = KvDim,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF070D07), RoundedCornerShape(3.dp))
+                            .border(1.dp, KvFaint, RoundedCornerShape(3.dp))
+                            .padding(10.dp),
+                    ) {
+                        Text(
+                            decryptedValue,
+                            fontFamily = VT323,
+                            fontSize = 17.sp,
+                            color = KvInk,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                KvButton(text = "CLOSE", onClick = onDismissDecrypted)
+            },
+            containerColor = Color(0xFF0C120C),
+            titleContentColor = KvAccent,
+            textContentColor = KvInk,
+        )
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 4.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(item.key, fontFamily = VT323, fontSize = 18.sp, color = KvInk, lineHeight = 18.sp)
-            if (item.zt) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "ZERO TRUST",
-                    fontFamily = PressStart2P,
-                    fontSize = 6.sp,
-                    color = KvOrange,
-                    modifier = Modifier
-                        .background(KvOrange.copy(alpha = 0.1f), RoundedCornerShape(3.dp))
-                        .border(1.dp, KvOrange.copy(alpha = 0.4f), RoundedCornerShape(3.dp))
-                        .padding(horizontal = 5.dp, vertical = 3.dp),
-                )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(item.key, fontFamily = VT323, fontSize = 18.sp, color = KvInk, lineHeight = 18.sp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    if (item.zt) {
+                        Text(
+                            "ZERO TRUST",
+                            fontFamily = PressStart2P,
+                            fontSize = 6.sp,
+                            color = KvOrange,
+                            modifier = Modifier
+                                .background(KvOrange.copy(alpha = 0.1f), RoundedCornerShape(3.dp))
+                                .border(1.dp, KvOrange.copy(alpha = 0.4f), RoundedCornerShape(3.dp))
+                                .padding(horizontal = 5.dp, vertical = 3.dp),
+                        )
+                    }
+                    if (item.deviceEncrypted) {
+                        Text(
+                            "DEVICE ENC",
+                            fontFamily = PressStart2P,
+                            fontSize = 6.sp,
+                            color = KvAccent,
+                            modifier = Modifier
+                                .background(KvAccent.copy(alpha = 0.08f), RoundedCornerShape(3.dp))
+                                .border(1.dp, KvAccent.copy(alpha = 0.35f), RoundedCornerShape(3.dp))
+                                .padding(horizontal = 5.dp, vertical = 3.dp),
+                        )
+                    }
+                }
+            }
+            if (!item.scope.isNullOrEmpty()) {
+                KvChip(item.scope)
+            } else {
+                Text("+ scope", fontFamily = VT323, fontSize = 15.sp, color = KvFaint)
             }
         }
-        if (!item.scope.isNullOrEmpty()) {
-            KvChip(item.scope)
-        } else {
-            Text("+ scope", fontFamily = VT323, fontSize = 15.sp, color = KvFaint)
+
+        if (item.deviceEncrypted && canDecrypt) {
+            Spacer(Modifier.height(8.dp))
+            KvButtonOutline(
+                text = if (isDecrypting) "…" else "DECRYPT",
+                onClick = onDecrypt,
+                enabled = !isDecrypting,
+                color = KvAccent,
+            )
         }
     }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()

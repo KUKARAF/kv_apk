@@ -25,6 +25,20 @@ class Prefs(context: Context) {
         get() = prefs.getString("session_email", "") ?: ""
         set(v) { prefs.edit().putString("session_email", v).apply() }
 
+    var deviceId: String
+        get() = prefs.getString("device_id", "") ?: ""
+        set(v) { prefs.edit().putString("device_id", v).apply() }
+
+    var devicePrivKeyPkcs8: String
+        get() = prefs.getString("device_priv_key_pkcs8", "") ?: ""
+        set(v) { prefs.edit().putString("device_priv_key_pkcs8", v).apply() }
+
+    var devicePubKeySpki: String
+        get() = prefs.getString("device_pub_key_spki", "") ?: ""
+        set(v) { prefs.edit().putString("device_pub_key_spki", v).apply() }
+
+    fun hasDeviceKey() = deviceId.isNotBlank() && devicePrivKeyPkcs8.isNotBlank()
+
     fun hasCredentials() = token.isNotBlank()
 
     fun clear() = prefs.edit().clear().apply()

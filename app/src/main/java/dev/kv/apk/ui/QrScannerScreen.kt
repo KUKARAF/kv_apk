@@ -75,7 +75,7 @@ fun QrScannerScreen(onScanned: (String) -> Unit, onCancel: () -> Unit) {
                         .border(3.dp, Color.White, RoundedCornerShape(12.dp))
                 )
                 Text(
-                    "Point at the QR code from\nApprovals → Add phone",
+                    "Point at the QR code from\nDevices → Add phone",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.White,
                     textAlign = TextAlign.Center,

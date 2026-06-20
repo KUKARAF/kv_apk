@@ -54,12 +54,29 @@ data class KvEntryItem(
     val value: String? = null,
     val scope: String? = null,
     val zt: Boolean = false,
+    @SerializedName("device_encrypted") val deviceEncrypted: Boolean = false,
 )
 
 data class DeviceItem(
     val id: String,
     val name: String,
-    @SerializedName("registered_at") val registeredAt: String,
+    @SerializedName("created_at") val registeredAt: String,
+    @SerializedName("key_type") val keyType: String? = null,
+    @SerializedName("public_key") val publicKey: String? = null,
+)
+
+data class DeviceKvRecipient(
+    @SerializedName("key_type") val keyType: String,
+    @SerializedName("ephemeral_pub") val ephemeralPub: String,
+    @SerializedName("dek_nonce") val dekNonce: String,
+    @SerializedName("encrypted_dek") val encryptedDek: String,
+)
+
+data class DeviceKvPayload(
+    val nonce: String,
+    val ciphertext: String,
+    val aad: String,
+    val recipient: DeviceKvRecipient,
 )
 
 data class HardwareKeyItem(
@@ -130,6 +147,7 @@ data class CreateApiKeyRequest(
 data class DeviceRegistrationRequest(
     val name: String,
     @SerializedName("public_key") val publicKey: String,
+    @SerializedName("key_type") val keyType: String? = null,
 )
 
 data class DeviceRegistrationResponse(val id: String)
@@ -194,6 +212,12 @@ interface KvApi {
 
     @POST("api/devices")
     suspend fun registerDevice(@Body body: DeviceRegistrationRequest): Response<DeviceRegistrationResponse>
+
+    @GET("api/admin/devices/{deviceId}/kv/{kvKey}")
+    suspend fun getDeviceKv(
+        @Path("deviceId") deviceId: String,
+        @Path("kvKey") kvKey: String,
+    ): DeviceKvPayload
 }
 
 fun buildApi(token: String): KvApi {
