@@ -220,6 +220,36 @@ interface KvApi {
     ): DeviceKvPayload
 }
 
+data class CreateSessionRequestBody(
+    val label: String? = null,
+    @SerializedName("requested_duration_hours") val requestedDurationHours: Long? = null,
+)
+
+data class CreateSessionRequestResponse(
+    val id: String,
+    val url: String,
+    @SerializedName("expires_at") val expiresAt: String,
+)
+
+data class SessionRequestStatus(
+    val status: String,
+    @SerializedName("session_token") val sessionToken: String? = null,
+)
+
+interface KvUnauthApi {
+    @POST("api/session-request")
+    suspend fun createSessionRequest(@Body body: CreateSessionRequestBody): CreateSessionRequestResponse
+
+    @GET("api/session-request/{id}/status")
+    suspend fun pollStatus(@Path("id") id: String): SessionRequestStatus
+}
+
+fun buildUnauthApi(): KvUnauthApi = Retrofit.Builder()
+    .baseUrl(BASE_URL)
+    .addConverterFactory(GsonConverterFactory.create())
+    .build()
+    .create(KvUnauthApi::class.java)
+
 fun buildApi(token: String): KvApi {
     val client = OkHttpClient.Builder()
         .addInterceptor(Interceptor { chain ->

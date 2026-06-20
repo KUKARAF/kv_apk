@@ -49,15 +49,16 @@ class MainActivity : ComponentActivity() {
                 when (appScreen) {
                     AppScreen.SETUP -> SetupScreen(
                         prefs = prefs,
-                        onRegistered = { token ->
-                            prefs.token = token
-                            appScreen = AppScreen.MAIN
-                        }
+                        onSetupComplete = { appScreen = AppScreen.MAIN },
                     )
                     AppScreen.MAIN -> MainContent(
                         prefs = prefs,
                         onLogout = {
                             prefs.clear()
+                            appScreen = AppScreen.SETUP
+                        },
+                        onTokenExpired = {
+                            prefs.clearToken()
                             appScreen = AppScreen.SETUP
                         },
                     )
@@ -71,6 +72,7 @@ class MainActivity : ComponentActivity() {
 private fun MainContent(
     prefs: Prefs,
     onLogout: () -> Unit,
+    onTokenExpired: () -> Unit,
 ) {
     val api = remember { buildApi(prefs.token) }
     var screen by remember { mutableStateOf("home") }
@@ -82,7 +84,7 @@ private fun MainContent(
         try {
             approvals = api.listApprovals()
         } catch (e: retrofit2.HttpException) {
-            if (e.code() == 401) onLogout()
+            if (e.code() == 401) onTokenExpired()
         } catch (_: Exception) {}
     }
 
@@ -146,23 +148,23 @@ private fun MainContent(
             ),
         )
 
-        "kv" -> KvEntriesScreen(api = api, prefs = prefs, onBack = back, onLogout = onLogout)
+        "kv" -> KvEntriesScreen(api = api, prefs = prefs, onBack = back, onLogout = onTokenExpired)
 
-        "apikeys" -> KeysScreen(api = api, onBack = back, onLogout = onLogout)
+        "apikeys" -> KeysScreen(api = api, onBack = back, onLogout = onTokenExpired)
 
         "approvals" -> ApprovalsScreen(
             api = api,
             approvals = approvals,
             onBack = back,
-            onLogout = onLogout,
+            onLogout = onTokenExpired,
             onApprovalChanged = { refreshTick++ },
         )
 
-        "devices" -> DevicesScreen(api = api, onBack = back, onLogout = onLogout)
+        "devices" -> DevicesScreen(api = api, onBack = back, onLogout = onTokenExpired)
 
-        "zerotrust" -> ZeroTrustScreen(api = api, onBack = back, onLogout = onLogout)
+        "zerotrust" -> ZeroTrustScreen(api = api, onBack = back, onLogout = onTokenExpired)
 
-        "ratelimits" -> RateLimitsScreen(api = api, onBack = back, onLogout = onLogout)
+        "ratelimits" -> RateLimitsScreen(api = api, onBack = back, onLogout = onTokenExpired)
 
         "session" -> SessionScreen(api = api, onBack = back, onLogout = onLogout)
     }

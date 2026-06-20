@@ -41,5 +41,7 @@ class Prefs(context: Context) {
 
     fun hasCredentials() = token.isNotBlank()
 
+    fun clearToken() = prefs.edit().remove("token").remove("session_email").apply()
+
     fun clear() = prefs.edit().clear().apply()
 }
