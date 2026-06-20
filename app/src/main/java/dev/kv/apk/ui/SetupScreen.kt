@@ -323,7 +323,9 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                                                 )
                                                 approvalUrl = result.url
                                                 requestId = result.id
-                                                qrBitmap = runCatching { urlToQrBitmap(result.url) }.getOrNull()
+                                                // QR encodes the deep link so the KV app opens directly on scan
+                                                val deepLink = "kvapp://session-request?id=${result.id}"
+                                                qrBitmap = runCatching { urlToQrBitmap(deepLink) }.getOrNull()
                                                 phase = SetupPhase.WAITING
                                             } catch (e: Exception) {
                                                 error = e.message ?: "Request failed"

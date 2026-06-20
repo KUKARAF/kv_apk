@@ -1,5 +1,6 @@
 package dev.kv.apk
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -26,6 +27,7 @@ import dev.kv.apk.ui.KeysScreen
 import dev.kv.apk.ui.KvEntriesScreen
 import dev.kv.apk.ui.RateLimitsScreen
 import dev.kv.apk.ui.SessionScreen
+import dev.kv.apk.ui.SessionRequestApprovalScreen
 import dev.kv.apk.ui.SetupScreen
 import dev.kv.apk.ui.ZeroTrustScreen
 import dev.kv.apk.ui.theme.KvBg
@@ -37,6 +39,10 @@ private enum class AppScreen { SETUP, MAIN }
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val deepLinkId = intent.data
+            ?.takeIf { it.scheme == "kvapp" && it.host == "session-request" }
+            ?.getQueryParameter("id")
+
         setContent {
             KvTheme {
                 val prefs = remember { Prefs(applicationContext) }
@@ -53,6 +59,7 @@ class MainActivity : ComponentActivity() {
                     )
                     AppScreen.MAIN -> MainContent(
                         prefs = prefs,
+                        initialDeepLinkId = deepLinkId,
                         onLogout = {
                             prefs.clear()
                             appScreen = AppScreen.SETUP
@@ -71,11 +78,12 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MainContent(
     prefs: Prefs,
+    initialDeepLinkId: String? = null,
     onLogout: () -> Unit,
     onTokenExpired: () -> Unit,
 ) {
     val api = remember { buildApi(prefs.token) }
-    var screen by remember { mutableStateOf("home") }
+    var screen by remember { mutableStateOf(if (initialDeepLinkId != null) "approve:$initialDeepLinkId" else "home") }
 
     var approvals by remember { mutableStateOf<List<ApprovalItem>>(emptyList()) }
     var refreshTick by remember { mutableIntStateOf(0) }
@@ -167,6 +175,16 @@ private fun MainContent(
         "ratelimits" -> RateLimitsScreen(api = api, onBack = back, onLogout = onTokenExpired)
 
         "session" -> SessionScreen(api = api, onBack = back, onLogout = onLogout)
+
+        else -> if (screen.startsWith("approve:")) {
+            val requestId = screen.removePrefix("approve:")
+            SessionRequestApprovalScreen(
+                api = api,
+                requestId = requestId,
+                onDone = back,
+                onLogout = onTokenExpired,
+            )
+        }
     }
     }
 }

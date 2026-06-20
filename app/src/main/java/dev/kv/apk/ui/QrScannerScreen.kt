@@ -31,7 +31,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun QrScannerScreen(onScanned: (String) -> Unit, onCancel: () -> Unit) {
+fun QrScannerScreen(
+    onScanned: (String) -> Unit,
+    onCancel: () -> Unit,
+    hint: String = "Point at the QR code from\nDevices → Add phone",
+) {
     val context = LocalContext.current
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -75,7 +79,7 @@ fun QrScannerScreen(onScanned: (String) -> Unit, onCancel: () -> Unit) {
                         .border(3.dp, Color.White, RoundedCornerShape(12.dp))
                 )
                 Text(
-                    "Point at the QR code from\nDevices → Add phone",
+                    hint,
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.White,
                     textAlign = TextAlign.Center,

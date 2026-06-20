@@ -110,9 +110,11 @@ fun KvButtonDanger(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     OutlinedButton(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier,
         shape = RoundedCornerShape(2.dp),
         colors = ButtonDefaults.outlinedButtonColors(

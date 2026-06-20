@@ -210,6 +210,18 @@ interface KvApi {
     @DELETE("api/admin/session-key")
     suspend fun revokeSessionKey(): Response<Unit>
 
+    @GET("api/admin/session-requests/{id}")
+    suspend fun getSessionRequest(@Path("id") id: String): SessionRequestDetails
+
+    @POST("api/admin/session-requests/{id}/approve")
+    suspend fun approveSessionRequest(
+        @Path("id") id: String,
+        @Body body: ApproveSessionRequestBody,
+    ): Response<Unit>
+
+    @POST("api/admin/session-requests/{id}/reject")
+    suspend fun rejectSessionRequest(@Path("id") id: String): Response<Unit>
+
     @POST("api/devices")
     suspend fun registerDevice(@Body body: DeviceRegistrationRequest): Response<DeviceRegistrationResponse>
 
@@ -219,6 +231,19 @@ interface KvApi {
         @Path("kvKey") kvKey: String,
     ): DeviceKvPayload
 }
+
+data class ApproveSessionRequestBody(
+    @SerializedName("approved_duration_hours") val approvedDurationHours: Long,
+)
+
+data class SessionRequestDetails(
+    val id: String,
+    val label: String? = null,
+    val status: String,
+    @SerializedName("requested_at") val requestedAt: String,
+    @SerializedName("expires_at") val expiresAt: String,
+    @SerializedName("requested_duration_hours") val requestedDurationHours: Long? = null,
+)
 
 data class CreateSessionRequestBody(
     val label: String? = null,
