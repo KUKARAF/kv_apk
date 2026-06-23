@@ -168,7 +168,7 @@ private fun MainContent(
             onApprovalChanged = { refreshTick++ },
         )
 
-        "devices" -> DevicesScreen(api = api, onBack = back, onLogout = onTokenExpired)
+        "devices" -> DevicesScreen(api = api, prefs = prefs, onBack = back, onLogout = onTokenExpired)
 
         "zerotrust" -> ZeroTrustScreen(api = api, onBack = back, onLogout = onTokenExpired)
 

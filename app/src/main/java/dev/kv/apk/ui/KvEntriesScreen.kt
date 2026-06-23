@@ -467,6 +467,8 @@ fun KvEntriesScreen(
                                     decryptedValues = decryptedValues + (entry.key to plaintext)
                                 } catch (e: retrofit2.HttpException) {
                                     if (e.code() == 401) onLogout()
+                                    else if (e.code() == 404) decryptedValues = decryptedValues + (entry.key to
+                                        "This device no longer has access to this entry.\nAnother authorized device must re-grant access via the DEVICES button.")
                                     else decryptedValues = decryptedValues + (entry.key to "error ${e.code()}")
                                 } catch (e: Exception) {
                                     decryptedValues = decryptedValues + (entry.key to "decrypt failed: ${e.message}")
@@ -629,6 +631,8 @@ fun KvEntriesScreen(
                             manageDevicesEntry = null
                         } catch (e: retrofit2.HttpException) {
                             if (e.code() == 401) onLogout()
+                            else if (e.code() == 404) reEncryptError =
+                                "This device no longer has access to this entry. Another authorized device must re-grant access first."
                             else reEncryptError = "error ${e.code()}"
                         } catch (e: Exception) {
                             reEncryptError = e.message ?: "failed"
@@ -748,19 +752,29 @@ private fun EntryRow(
             }
         }
 
-        if (item.deviceEncrypted && canDecrypt) {
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                KvButtonOutline(
-                    text = if (isDecrypting) "…" else "DECRYPT",
-                    onClick = onDecrypt,
-                    enabled = !isDecrypting,
-                    color = KvAccent,
-                )
-                KvButtonOutline(
-                    text = "DEVICES",
-                    onClick = onManageDevices,
-                    color = KvOrange,
+        if (item.deviceEncrypted) {
+            if (canDecrypt) {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    KvButtonOutline(
+                        text = if (isDecrypting) "…" else "DECRYPT",
+                        onClick = onDecrypt,
+                        enabled = !isDecrypting,
+                        color = KvAccent,
+                    )
+                    KvButtonOutline(
+                        text = "DEVICES",
+                        onClick = onManageDevices,
+                        color = KvOrange,
+                    )
+                }
+            } else {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "No device key — register in Devices to decrypt",
+                    fontFamily = VT323,
+                    fontSize = 14.sp,
+                    color = KvDim,
                 )
             }
         }
