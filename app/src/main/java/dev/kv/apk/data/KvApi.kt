@@ -79,6 +79,23 @@ data class DeviceKvPayload(
     val recipient: DeviceKvRecipient,
 )
 
+data class DeviceKvRecipientRequest(
+    @SerializedName("device_id") val deviceId: String,
+    @SerializedName("key_type") val keyType: String,
+    @SerializedName("ephemeral_pub") val ephemeralPub: String,
+    @SerializedName("dek_nonce") val dekNonce: String,
+    @SerializedName("encrypted_dek") val encryptedDek: String,
+)
+
+data class ReEncryptRequest(
+    val key: String,
+    val scope: String,
+    val nonce: String,
+    val ciphertext: String,
+    val aad: String,
+    val recipients: List<DeviceKvRecipientRequest>,
+)
+
 data class HardwareKeyItem(
     val id: String,
     val label: String,
@@ -230,6 +247,9 @@ interface KvApi {
         @Path("deviceId") deviceId: String,
         @Path("kvKey") kvKey: String,
     ): DeviceKvPayload
+
+    @POST("api/admin/kv/device")
+    suspend fun setDeviceKvEntry(@Body body: ReEncryptRequest): Response<Unit>
 }
 
 data class ApproveSessionRequestBody(

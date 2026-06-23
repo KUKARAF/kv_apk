@@ -32,9 +32,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.CreateKvRequest
+import dev.kv.apk.data.DeviceItem
+import dev.kv.apk.data.DeviceKvRecipientRequest
 import dev.kv.apk.data.KvApi
 import dev.kv.apk.data.KvEntryItem
 import dev.kv.apk.data.Prefs
+import dev.kv.apk.data.ReEncryptRequest
 import dev.kv.apk.ui.theme.KvAccent
 import dev.kv.apk.ui.theme.KvBg
 import dev.kv.apk.ui.theme.KvDanger
@@ -46,6 +49,9 @@ import dev.kv.apk.ui.theme.PressStart2P
 import dev.kv.apk.ui.theme.VT323
 import kotlinx.coroutines.launch
 import java.security.KeyFactory
+import java.security.KeyPairGenerator
+import java.security.SecureRandom
+import java.security.spec.ECGenParameterSpec
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
@@ -82,13 +88,78 @@ private fun hkdfExpand(prk: ByteArray, info: ByteArray, length: Int): ByteArray 
 private fun hkdf(secret: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray =
     hkdfExpand(hkdfExtract(salt, secret), info, length)
 
-// AES-256-GCM decrypt
+// AES-256-GCM decrypt/encrypt
 
 private fun aesGcmDecrypt(key: ByteArray, nonce: ByteArray, ciphertext: ByteArray, aad: ByteArray): ByteArray {
     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
     cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, nonce))
     cipher.updateAAD(aad)
     return cipher.doFinal(ciphertext)
+}
+
+private fun aesGcmEncrypt(key: ByteArray, nonce: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, nonce))
+    cipher.updateAAD(aad)
+    return cipher.doFinal(plaintext)
+}
+
+private fun encryptForDevices(
+    plaintext: String,
+    entryKey: String,
+    scope: String,
+    devices: List<DeviceItem>,
+): ReEncryptRequest {
+    val rng = SecureRandom()
+    val kf = KeyFactory.getInstance("EC")
+    val kpg = KeyPairGenerator.getInstance("EC")
+    kpg.initialize(ECGenParameterSpec("secp256r1"))
+
+    val dek = ByteArray(32).also { rng.nextBytes(it) }
+    val nonce = ByteArray(12).also { rng.nextBytes(it) }
+    val aadBytes = "device-kv:$entryKey".toByteArray(Charsets.UTF_8)
+    val ciphertext = aesGcmEncrypt(dek, nonce, plaintext.toByteArray(Charsets.UTF_8), aadBytes)
+
+    val recipients = devices.mapNotNull { device ->
+        val pubKeyBytes = Base64.decode(device.publicKey ?: return@mapNotNull null, Base64.DEFAULT)
+        val devicePubKey = kf.generatePublic(X509EncodedKeySpec(pubKeyBytes))
+
+        val ephKp = kpg.generateKeyPair()
+        val ka = KeyAgreement.getInstance("ECDH")
+        ka.init(ephKp.private)
+        ka.doPhase(devicePubKey, true)
+        val sharedSecret = ka.generateSecret()
+
+        val wrapKey = hkdf(
+            secret = sharedSecret,
+            salt = ByteArray(32),
+            info = "kv-device-wrap".toByteArray(Charsets.UTF_8),
+            length = 32,
+        )
+
+        val dekNonce = ByteArray(12).also { rng.nextBytes(it) }
+        val encryptedDek = aesGcmEncrypt(wrapKey, dekNonce, dek, ByteArray(0))
+
+        // SPKI-encoded public key: strip the 26-byte header to get the raw 65-byte point
+        val rawEphPub = ephKp.public.encoded.drop(P256_SPKI_HEADER.size).toByteArray()
+
+        DeviceKvRecipientRequest(
+            deviceId = device.id,
+            keyType = device.keyType ?: "p256",
+            ephemeralPub = Base64.encodeToString(rawEphPub, Base64.NO_WRAP),
+            dekNonce = Base64.encodeToString(dekNonce, Base64.NO_WRAP),
+            encryptedDek = Base64.encodeToString(encryptedDek, Base64.NO_WRAP),
+        )
+    }
+
+    return ReEncryptRequest(
+        key = entryKey,
+        scope = scope,
+        nonce = Base64.encodeToString(nonce, Base64.NO_WRAP),
+        ciphertext = Base64.encodeToString(ciphertext, Base64.NO_WRAP),
+        aad = Base64.encodeToString(aadBytes, Base64.NO_WRAP),
+        recipients = recipients,
+    )
 }
 
 // P-256 SPKI header (26 bytes): prepend before the 65-byte uncompressed EC point
@@ -187,6 +258,13 @@ fun KvEntriesScreen(
     // Decrypted values: key → plaintext (or error string)
     var decryptedValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var decryptingKey by remember { mutableStateOf<String?>(null) }
+
+    // Manage device access dialog
+    var manageDevicesEntry by remember { mutableStateOf<KvEntryItem?>(null) }
+    var allDevices by remember { mutableStateOf<List<DeviceItem>>(emptyList()) }
+    var selectedDeviceIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var reEncryptBusy by remember { mutableStateOf(false) }
+    var reEncryptError by remember { mutableStateOf("") }
 
     fun loadEntries() {
         scope.launch {
@@ -400,6 +478,16 @@ fun KvEntriesScreen(
                         onDismissDecrypted = {
                             decryptedValues = decryptedValues - entry.key
                         },
+                        onManageDevices = {
+                            scope.launch {
+                                try {
+                                    allDevices = api.listDevices()
+                                } catch (_: Exception) {}
+                                selectedDeviceIds = emptySet()
+                                reEncryptError = ""
+                                manageDevicesEntry = entry
+                            }
+                        },
                     )
                 }
 
@@ -507,6 +595,51 @@ fun KvEntriesScreen(
         }
 
         ScanlineOverlay()
+
+        manageDevicesEntry?.let { entry ->
+            ManageDevicesDialog(
+                entry = entry,
+                devices = allDevices.filter { it.publicKey != null },
+                selectedDeviceIds = selectedDeviceIds,
+                onToggle = { id ->
+                    selectedDeviceIds = if (id in selectedDeviceIds)
+                        selectedDeviceIds - id else selectedDeviceIds + id
+                },
+                busy = reEncryptBusy,
+                error = reEncryptError,
+                onConfirm = {
+                    scope.launch {
+                        reEncryptBusy = true
+                        reEncryptError = ""
+                        try {
+                            val payload = api.getDeviceKv(prefs.deviceId, entry.key)
+                            val plaintext = decryptDeviceKv(
+                                privKeyPkcs8B64 = prefs.devicePrivKeyPkcs8,
+                                nonce = payload.nonce,
+                                ciphertext = payload.ciphertext,
+                                aad = payload.aad,
+                                ephemeralPub = payload.recipient.ephemeralPub,
+                                dekNonce = payload.recipient.dekNonce,
+                                encryptedDek = payload.recipient.encryptedDek,
+                            )
+                            val selected = allDevices.filter { it.id in selectedDeviceIds }
+                            val request = encryptForDevices(plaintext, entry.key, entry.scope ?: "", selected)
+                            api.setDeviceKvEntry(request)
+                            toast = "re-encrypted ${entry.key}"
+                            manageDevicesEntry = null
+                        } catch (e: retrofit2.HttpException) {
+                            if (e.code() == 401) onLogout()
+                            else reEncryptError = "error ${e.code()}"
+                        } catch (e: Exception) {
+                            reEncryptError = e.message ?: "failed"
+                        } finally {
+                            reEncryptBusy = false
+                        }
+                    }
+                },
+                onDismiss = { manageDevicesEntry = null },
+            )
+        }
     }
 }
 
@@ -518,6 +651,7 @@ private fun EntryRow(
     canDecrypt: Boolean,
     onDecrypt: () -> Unit,
     onDismissDecrypted: () -> Unit,
+    onManageDevices: () -> Unit,
 ) {
     // Dialog showing the decrypted plaintext
     if (decryptedValue != null) {
@@ -616,12 +750,19 @@ private fun EntryRow(
 
         if (item.deviceEncrypted && canDecrypt) {
             Spacer(Modifier.height(8.dp))
-            KvButtonOutline(
-                text = if (isDecrypting) "…" else "DECRYPT",
-                onClick = onDecrypt,
-                enabled = !isDecrypting,
-                color = KvAccent,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KvButtonOutline(
+                    text = if (isDecrypting) "…" else "DECRYPT",
+                    onClick = onDecrypt,
+                    enabled = !isDecrypting,
+                    color = KvAccent,
+                )
+                KvButtonOutline(
+                    text = "DEVICES",
+                    onClick = onManageDevices,
+                    color = KvOrange,
+                )
+            }
         }
     }
 
@@ -630,5 +771,84 @@ private fun EntryRow(
             .fillMaxWidth()
             .height(1.dp)
             .background(KvFaint),
+    )
+}
+
+@Composable
+private fun ManageDevicesDialog(
+    entry: KvEntryItem,
+    devices: List<DeviceItem>,
+    selectedDeviceIds: Set<String>,
+    onToggle: (String) -> Unit,
+    busy: Boolean,
+    error: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = {
+            Text(
+                "MANAGE DEVICES",
+                fontFamily = PressStart2P,
+                fontSize = 9.sp,
+                color = KvAccent,
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    entry.key,
+                    fontFamily = VT323,
+                    fontSize = 17.sp,
+                    color = KvDim,
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+                if (devices.isEmpty()) {
+                    Text(
+                        "No devices with public keys registered.",
+                        fontFamily = VT323,
+                        fontSize = 16.sp,
+                        color = KvDim,
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        devices.forEach { device ->
+                            KvCheckbox(
+                                checked = device.id in selectedDeviceIds,
+                                label = device.name,
+                                onToggle = { onToggle(device.id) },
+                            )
+                        }
+                    }
+                }
+                if (error.isNotBlank()) {
+                    Text(
+                        error,
+                        fontFamily = VT323,
+                        fontSize = 15.sp,
+                        color = KvDanger,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            KvButton(
+                text = if (busy) "…" else "RE-ENCRYPT",
+                onClick = onConfirm,
+                enabled = !busy && selectedDeviceIds.isNotEmpty(),
+            )
+        },
+        dismissButton = {
+            KvButtonOutline(
+                text = "CANCEL",
+                onClick = onDismiss,
+                enabled = !busy,
+            )
+        },
+        containerColor = Color(0xFF0C120C),
+        titleContentColor = KvAccent,
+        textContentColor = KvInk,
     )
 }
