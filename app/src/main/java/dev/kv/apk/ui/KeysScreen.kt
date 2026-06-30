@@ -31,7 +31,6 @@ import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.ApiKeyItem
 import dev.kv.apk.data.CreateApiKeyRequest
 import dev.kv.apk.data.KvApi
-import dev.kv.apk.data.ScopeRule
 import dev.kv.apk.ui.theme.KvAccent
 import dev.kv.apk.ui.theme.KvBg
 import dev.kv.apk.ui.theme.KvDim
@@ -55,7 +54,6 @@ fun KeysScreen(
     var formLabel by remember { mutableStateOf("") }
     var formType by remember { mutableStateOf("Standard") }
     var formExpires by remember { mutableStateOf("") }
-    var formScope by remember { mutableStateOf("") }
 
     fun loadKeys() {
         scope.launch {
@@ -146,37 +144,22 @@ fun KeysScreen(
                                     .padding(bottom = 13.dp),
                             )
 
-                            KvLabel("SCOPE")
-                            KvInput(
-                                value = formScope,
-                                onValueChange = { formScope = it },
-                                placeholder = "osmosis/deployment",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 15.dp),
-                            )
-
                             KvButton(
                                 text = "CREATE",
                                 enabled = formLabel.isNotBlank() && !loading,
                                 onClick = {
                                     scope.launch {
                                         try {
-                                            val scopes = if (formScope.isNotBlank())
-                                                listOf(ScopeRule(formScope.trim(), listOf("read", "write")))
-                                            else emptyList()
                                             api.createKey(
                                                 CreateApiKeyRequest(
                                                     label = formLabel.trim(),
                                                     type = formType.lowercase(),
                                                     expiresAt = formExpires.ifBlank { null },
-                                                    scopes = scopes,
                                                 )
                                             )
                                             toast = "created ${formLabel.trim()}"
                                             formLabel = ""
                                             formExpires = ""
-                                            formScope = ""
                                             loadKeys()
                                         } catch (e: retrofit2.HttpException) {
                                             if (e.code() == 401) onLogout()
@@ -256,14 +239,6 @@ private fun KeyCard(item: ApiKeyItem, onRevoke: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text("type ${item.keyType}", fontFamily = VT323, fontSize = 15.sp, color = KvDim)
-                if (item.scopes.isNotEmpty()) {
-                    Text(
-                        "scope ${item.scopes.joinToString { it.scope }}",
-                        fontFamily = VT323,
-                        fontSize = 15.sp,
-                        color = KvDim,
-                    )
-                }
             }
 
             if (!item.expiresAt.isNullOrEmpty()) {

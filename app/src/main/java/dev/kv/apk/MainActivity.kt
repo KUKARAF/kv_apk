@@ -26,6 +26,7 @@ import dev.kv.apk.ui.HomeTile
 import dev.kv.apk.ui.KeysScreen
 import dev.kv.apk.ui.KvEntriesScreen
 import dev.kv.apk.ui.RateLimitsScreen
+import dev.kv.apk.ui.SecureShareScreen
 import dev.kv.apk.ui.SessionScreen
 import dev.kv.apk.ui.SessionRequestApprovalScreen
 import dev.kv.apk.ui.SetupScreen
@@ -153,6 +154,11 @@ private fun MainContent(
                     desc = "signed in",
                     onClick = { screen = "session" },
                 ),
+                HomeTile(
+                    n = "08", title = "SHARE",
+                    desc = "one-time encrypted link",
+                    onClick = { screen = "share" },
+                ),
             ),
         )
 
@@ -175,6 +181,8 @@ private fun MainContent(
         "ratelimits" -> RateLimitsScreen(api = api, onBack = back, onLogout = onTokenExpired)
 
         "session" -> SessionScreen(api = api, onBack = back, onLogout = onLogout)
+
+        "share" -> SecureShareScreen(api = api, onBack = back, onLogout = onTokenExpired)
 
         else -> if (screen.startsWith("approve:")) {
             val requestId = screen.removePrefix("approve:")

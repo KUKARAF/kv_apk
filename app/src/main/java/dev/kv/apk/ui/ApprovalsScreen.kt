@@ -171,10 +171,6 @@ private fun ApprovalCard(
                     .padding(bottom = 13.dp),
                 verticalAlignment = Alignment.Top,
             ) {
-                if (!item.scope.isNullOrEmpty()) {
-                    KvChip(item.scope)
-                    Spacer(Modifier.width(14.dp))
-                }
                 Column {
                     if (!item.requester.isNullOrEmpty()) {
                         Text(

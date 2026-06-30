@@ -20,7 +20,6 @@ data class ApprovalItem(
     @SerializedName("requested_at") val requestedAt: String,
     @SerializedName("expires_at") val expiresAt: String,
     val key: String? = null,
-    val scope: String? = null,
     val requester: String? = null,
     val ip: String? = null,
 )
@@ -34,14 +33,9 @@ data class ApiKeyItem(
     val label: String,
     @SerializedName("key_type") val keyType: String,
     val status: String,
-    val scopes: List<ScopeItem>,
+    @SerializedName("allowed_keys") val allowedKeys: List<String> = emptyList(),
     @SerializedName("expires_at") val expiresAt: String? = null,
     @SerializedName("last_used") val lastUsed: String? = null,
-)
-
-data class ScopeItem(
-    val scope: String,
-    val ops: String,
 )
 
 data class CreateKeyResponse(
@@ -52,7 +46,6 @@ data class CreateKeyResponse(
 data class KvEntryItem(
     val key: String,
     val value: String? = null,
-    val scope: String? = null,
     val zt: Boolean = false,
     @SerializedName("device_encrypted") val deviceEncrypted: Boolean = false,
 )
@@ -89,7 +82,6 @@ data class DeviceKvRecipientRequest(
 
 data class ReEncryptRequest(
     val key: String,
-    val scope: String,
     val nonce: String,
     val ciphertext: String,
     val aad: String,
@@ -139,7 +131,6 @@ data class SessionInfo(
 
 data class CreateKvRequest(
     val key: String,
-    val scope: String,
     val value: String,
     val ttl: Int? = null,
     val sliding: Boolean = false,
@@ -149,17 +140,21 @@ data class CreateKvRequest(
     @SerializedName("zero_trust") val zeroTrust: Boolean = false,
 )
 
-data class ScopeRule(
-    val scope: String,
-    val ops: List<String>,
-)
-
 data class CreateApiKeyRequest(
     val label: String,
     val type: String,
     @SerializedName("expires_at") val expiresAt: String? = null,
-    val scopes: List<ScopeRule> = emptyList(),
+    @SerializedName("allowed_keys") val allowedKeys: List<String> = emptyList(),
 )
+
+data class CreateShareRequest(
+    @SerializedName("kv_key") val kvKey: String,
+    val ciphertext: String,
+    val nonce: String,
+    @SerializedName("expires_in_hours") val expiresInHours: Double? = null,
+)
+
+data class CreateShareResponse(val id: String)
 
 data class DeviceRegistrationRequest(
     val name: String,
@@ -208,6 +203,9 @@ interface KvApi {
 
     @DELETE("api/admin/hardware-keys/{id}")
     suspend fun deleteHardwareKey(@Path("id") id: String): Response<Unit>
+
+    @POST("api/admin/shares")
+    suspend fun createShare(@Body body: CreateShareRequest): CreateShareResponse
 
     @GET("api/admin/rate-limits/blocked")
     suspend fun listBlockedIps(): List<BlockedIpItem>

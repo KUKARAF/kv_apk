@@ -107,7 +107,6 @@ private fun aesGcmEncrypt(key: ByteArray, nonce: ByteArray, plaintext: ByteArray
 private fun encryptForDevices(
     plaintext: String,
     entryKey: String,
-    scope: String,
     devices: List<DeviceItem>,
 ): ReEncryptRequest {
     val rng = SecureRandom()
@@ -154,7 +153,6 @@ private fun encryptForDevices(
 
     return ReEncryptRequest(
         key = entryKey,
-        scope = scope,
         nonce = Base64.encodeToString(nonce, Base64.NO_WRAP),
         ciphertext = Base64.encodeToString(ciphertext, Base64.NO_WRAP),
         aad = Base64.encodeToString(aadBytes, Base64.NO_WRAP),
@@ -240,7 +238,6 @@ fun KvEntriesScreen(
     var search by remember { mutableStateOf("") }
 
     var kvKey by remember { mutableStateOf("") }
-    var kvScope by remember { mutableStateOf("") }
     var kvValue by remember { mutableStateOf("") }
     var kvTtl by remember { mutableStateOf("") }
     var kvSliding by remember { mutableStateOf(false) }
@@ -250,10 +247,8 @@ fun KvEntriesScreen(
     var kvZeroTrust by remember { mutableStateOf(false) }
 
     var genLinkDesc by remember { mutableStateOf("") }
-    var genLinkScope by remember { mutableStateOf("") }
 
     var importText by remember { mutableStateOf("") }
-    var importScope by remember { mutableStateOf("") }
 
     // Decrypted values: key → plaintext (or error string)
     var decryptedValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -306,16 +301,6 @@ fun KvEntriesScreen(
                                 value = kvKey,
                                 onValueChange = { kvKey = it },
                                 placeholder = "DATABASE_URL",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 13.dp),
-                            )
-
-                            KvLabel("SCOPE")
-                            KvInput(
-                                value = kvScope,
-                                onValueChange = { kvScope = it },
-                                placeholder = "osmosis/deployment",
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(bottom = 13.dp),
@@ -389,7 +374,6 @@ fun KvEntriesScreen(
                                             api.setKvEntry(
                                                 CreateKvRequest(
                                                     key = kvKey.trim(),
-                                                    scope = kvScope.trim(),
                                                     value = kvValue,
                                                     ttl = kvTtl.toIntOrNull(),
                                                     sliding = kvSliding,
@@ -434,7 +418,6 @@ fun KvEntriesScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text("KEY", fontFamily = PressStart2P, fontSize = 8.sp, color = KvDim)
-                        Text("SCOPE", fontFamily = PressStart2P, fontSize = 8.sp, color = KvDim)
                     }
                     Box(
                         modifier = Modifier
@@ -444,7 +427,7 @@ fun KvEntriesScreen(
                     )
                 }
 
-                items(filtered, key = { "${it.key}|${it.scope}" }) { entry ->
+                items(filtered, key = { it.key }) { entry ->
                     EntryRow(
                         item = entry,
                         decryptedValue = decryptedValues[entry.key],
@@ -515,15 +498,6 @@ fun KvEntriesScreen(
                                     .padding(bottom = 9.dp),
                                 fontSize = 17,
                             )
-                            KvInput(
-                                value = genLinkScope,
-                                onValueChange = { genLinkScope = it },
-                                placeholder = "Scope  e.g. myapp/production",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 14.dp),
-                                fontSize = 17,
-                            )
                             KvButton(
                                 text = "GENERATE LINK",
                                 onClick = { toast = "request link generated" },
@@ -548,15 +522,6 @@ fun KvEntriesScreen(
                                 maxLines = 5,
                                 fontSize = 17,
                             )
-                            KvInput(
-                                value = importScope,
-                                onValueChange = { importScope = it },
-                                placeholder = "Scope",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 14.dp),
-                                fontSize = 17,
-                            )
                             KvButton(
                                 text = "IMPORT",
                                 enabled = importText.isNotBlank(),
@@ -573,7 +538,7 @@ fun KvEntriesScreen(
                                             if (k.isNotEmpty()) {
                                                 try {
                                                     api.setKvEntry(
-                                                        CreateKvRequest(key = k, scope = importScope.trim(), value = v)
+                                                        CreateKvRequest(key = k, value = v)
                                                     )
                                                     imported++
                                                 } catch (_: Exception) {}
@@ -625,7 +590,7 @@ fun KvEntriesScreen(
                                 encryptedDek = payload.recipient.encryptedDek,
                             )
                             val selected = allDevices.filter { it.id in selectedDeviceIds }
-                            val request = encryptForDevices(plaintext, entry.key, entry.scope ?: "", selected)
+                            val request = encryptForDevices(plaintext, entry.key, selected)
                             api.setDeviceKvEntry(request)
                             toast = "re-encrypted ${entry.key}"
                             manageDevicesEntry = null
@@ -744,11 +709,6 @@ private fun EntryRow(
                         )
                     }
                 }
-            }
-            if (!item.scope.isNullOrEmpty()) {
-                KvChip(item.scope)
-            } else {
-                Text("+ scope", fontFamily = VT323, fontSize = 15.sp, color = KvFaint)
             }
         }
 
