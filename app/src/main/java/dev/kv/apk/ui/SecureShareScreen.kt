@@ -178,7 +178,7 @@ fun SecureShareScreen(
                                                     expiresInHours = selectedTtl,
                                                 )
                                             )
-                                            val url = "https://kv.osmosis.page/share.html?id=${resp.id}#key=${keyB64}"
+                                            val url = "https://kv.osmosis.page/share?id=${resp.id}#key=${keyB64}"
                                             uiState = ShareUiState.Done(url)
                                         } catch (e: retrofit2.HttpException) {
                                             if (e.code() == 401) onLogout()
