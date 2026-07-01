@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
                         prefs = prefs,
                         initialDeepLinkId = deepLinkId,
                         onLogout = {
-                            prefs.clear()
+                            prefs.clearToken()
                             appScreen = AppScreen.SETUP
                         },
                         onTokenExpired = {

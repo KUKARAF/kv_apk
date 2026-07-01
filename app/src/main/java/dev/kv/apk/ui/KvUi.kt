@@ -24,6 +24,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
@@ -399,4 +401,96 @@ fun KvDividerRow(leftLabel: String, rightLabel: String) {
         Text(leftLabel, fontFamily = PressStart2P, fontSize = 8.sp, color = KvDim, modifier = Modifier.weight(1f))
         Text(rightLabel, fontFamily = PressStart2P, fontSize = 8.sp, color = KvDim)
     }
+}
+
+enum class RegisterStep { CHOOSE, NAME }
+
+@Composable
+fun RegisterDeviceDialog(
+    step: RegisterStep,
+    name: String,
+    busy: Boolean,
+    error: String,
+    onNameChange: (String) -> Unit,
+    onChooseReuse: () -> Unit,
+    onChooseNew: () -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "REGISTER THIS DEVICE",
+                fontFamily = PressStart2P,
+                fontSize = 9.sp,
+                color = KvAccent,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                when (step) {
+                    RegisterStep.CHOOSE -> {
+                        Text(
+                            "A key pair already exists on this device. Use the existing key or generate a new one?",
+                            fontFamily = VT323,
+                            fontSize = 16.sp,
+                            color = KvDim,
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            KvButton(
+                                text = "RE-REGISTER EXISTING KEY",
+                                onClick = onChooseReuse,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            KvButtonOutline(
+                                text = "GENERATE NEW KEY PAIR",
+                                onClick = onChooseNew,
+                                modifier = Modifier.fillMaxWidth(),
+                                color = KvDanger,
+                            )
+                        }
+                    }
+                    RegisterStep.NAME -> {
+                        Text(
+                            "DEVICE NAME",
+                            fontFamily = PressStart2P,
+                            fontSize = 7.sp,
+                            color = KvDim,
+                        )
+                        KvInput(
+                            value = name,
+                            onValueChange = onNameChange,
+                            placeholder = "pixel pro",
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                if (error.isNotBlank()) {
+                    Text(error, fontFamily = VT323, fontSize = 15.sp, color = KvDanger)
+                }
+            }
+        },
+        confirmButton = {
+            if (step == RegisterStep.NAME) {
+                KvButton(
+                    text = if (busy) "…" else "REGISTER",
+                    onClick = onConfirm,
+                    enabled = !busy && name.isNotBlank(),
+                )
+            }
+        },
+        dismissButton = {
+            if (step == RegisterStep.NAME) {
+                KvButtonOutline(
+                    text = "CANCEL",
+                    onClick = onDismiss,
+                    enabled = !busy,
+                )
+            }
+        },
+        containerColor = Color(0xFF0C120C),
+        titleContentColor = KvAccent,
+        textContentColor = KvInk,
+    )
 }

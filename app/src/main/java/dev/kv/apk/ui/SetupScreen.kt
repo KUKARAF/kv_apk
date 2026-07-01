@@ -58,7 +58,7 @@ import kotlinx.coroutines.launch
 import java.security.KeyPairGenerator
 import java.security.spec.ECGenParameterSpec
 
-private enum class SetupPhase { FORM, WAITING, REGISTERING }
+private enum class SetupPhase { FORM, WAITING, REGISTERING, KEY_CHOICE }
 
 private data class DurationOption(val label: String, val hours: Long)
 
@@ -80,6 +80,15 @@ private fun generateOrLoadKeyPair(prefs: Prefs): String {
     prefs.devicePrivKeyPkcs8 = Base64.encodeToString(keyPair.private.encoded, Base64.NO_WRAP)
     prefs.devicePubKeySpki = Base64.encodeToString(keyPair.public.encoded, Base64.NO_WRAP)
 
+    return prefs.devicePubKeySpki
+}
+
+private fun forceNewKeyPair(prefs: Prefs): String {
+    val kpg = KeyPairGenerator.getInstance("EC")
+    kpg.initialize(ECGenParameterSpec("secp256r1"))
+    val keyPair = kpg.generateKeyPair()
+    prefs.devicePrivKeyPkcs8 = Base64.encodeToString(keyPair.private.encoded, Base64.NO_WRAP)
+    prefs.devicePubKeySpki = Base64.encodeToString(keyPair.public.encoded, Base64.NO_WRAP)
     return prefs.devicePubKeySpki
 }
 
@@ -106,6 +115,11 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    // KEY_CHOICE phase state
+    var keyChoiceShowNameInput by remember { mutableStateOf(false) }
+    var keyChoiceName by remember { mutableStateOf("") }
+    var keyChoiceBusy by remember { mutableStateOf(false) }
 
     // Polling loop while in WAITING phase
     LaunchedEffect(requestId) {
@@ -145,15 +159,30 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
     LaunchedEffect(phase) {
         if (phase != SetupPhase.REGISTERING) return@LaunchedEffect
         if (prefs.deviceId.isNotBlank()) {
-            // Already registered — just update session
-            onSetupComplete()
+            // Verify the device is still registered on the server
+            try {
+                val serverDevices = buildApi(prefs.token).listDevices()
+                if (serverDevices.any { it.id == prefs.deviceId }) {
+                    onSetupComplete()
+                    return@LaunchedEffect
+                }
+            } catch (_: Exception) {
+                // Network error — assume device is still valid
+                onSetupComplete()
+                return@LaunchedEffect
+            }
+            // Device no longer on server — ask user what to do
+            prefs.deviceId = ""
+            keyChoiceShowNameInput = false
+            keyChoiceName = ""
+            phase = SetupPhase.KEY_CHOICE
             return@LaunchedEffect
         }
         try {
             val resp = buildApi(prefs.token).registerDevice(
                 DeviceRegistrationRequest(
                     name = deviceName.trim(),
-                    publicKey = publicKey,
+                    publicKey = prefs.devicePubKeySpki,
                     keyType = "p256",
                 )
             )
@@ -443,7 +472,7 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                     }
                 }
 
-                SetupPhase.REGISTERING -> {
+                SetupPhase.REGISTERING, SetupPhase.KEY_CHOICE -> {
                     Text(
                         "> REGISTERING…",
                         fontFamily = PressStart2P,
@@ -458,6 +487,47 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
 
             Spacer(Modifier.height(40.dp))
             Text("kv.osmosis.page", fontFamily = VT323, fontSize = 14.sp, color = KvFaint)
+        }
+
+        if (phase == SetupPhase.KEY_CHOICE) {
+            RegisterDeviceDialog(
+                step = if (keyChoiceShowNameInput) RegisterStep.NAME else RegisterStep.CHOOSE,
+                name = keyChoiceName,
+                busy = keyChoiceBusy,
+                error = error ?: "",
+                onNameChange = { keyChoiceName = it },
+                onChooseReuse = { keyChoiceShowNameInput = true },
+                onChooseNew = {
+                    forceNewKeyPair(prefs)
+                    keyChoiceShowNameInput = true
+                },
+                onConfirm = {
+                    scope.launch {
+                        keyChoiceBusy = true
+                        error = null
+                        try {
+                            val resp = buildApi(prefs.token).registerDevice(
+                                DeviceRegistrationRequest(
+                                    name = keyChoiceName.trim(),
+                                    publicKey = prefs.devicePubKeySpki,
+                                    keyType = "p256",
+                                )
+                            )
+                            if (resp.isSuccessful) {
+                                prefs.deviceId = resp.body()!!.id
+                                onSetupComplete()
+                            } else {
+                                error = "Registration failed: HTTP ${resp.code()}"
+                            }
+                        } catch (e: Exception) {
+                            error = "Registration failed: ${e.message}"
+                        } finally {
+                            keyChoiceBusy = false
+                        }
+                    }
+                },
+                onDismiss = { /* non-dismissable: user must register */ },
+            )
         }
 
         ScanlineOverlay()

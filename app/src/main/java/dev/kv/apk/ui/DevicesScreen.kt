@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,7 +23,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.DeviceItem
@@ -42,8 +40,6 @@ import dev.kv.apk.ui.theme.VT323
 import kotlinx.coroutines.launch
 import java.security.KeyPairGenerator
 import java.security.spec.ECGenParameterSpec
-
-private enum class RegisterStep { CHOOSE, NAME }
 
 private fun generateAndStoreKeyPair(prefs: Prefs): String {
     val kpg = KeyPairGenerator.getInstance("EC")
@@ -218,95 +214,6 @@ fun DevicesScreen(
     }
 }
 
-@Composable
-private fun RegisterDeviceDialog(
-    step: RegisterStep,
-    name: String,
-    busy: Boolean,
-    error: String,
-    onNameChange: (String) -> Unit,
-    onChooseReuse: () -> Unit,
-    onChooseNew: () -> Unit,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                "REGISTER THIS DEVICE",
-                fontFamily = PressStart2P,
-                fontSize = 9.sp,
-                color = KvAccent,
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                when (step) {
-                    RegisterStep.CHOOSE -> {
-                        Text(
-                            "A key pair already exists on this device. Use the existing key or generate a new one?",
-                            fontFamily = VT323,
-                            fontSize = 16.sp,
-                            color = KvDim,
-                        )
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            KvButton(
-                                text = "RE-REGISTER EXISTING KEY",
-                                onClick = onChooseReuse,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            KvButtonOutline(
-                                text = "GENERATE NEW KEY PAIR",
-                                onClick = onChooseNew,
-                                modifier = Modifier.fillMaxWidth(),
-                                color = KvDanger,
-                            )
-                        }
-                    }
-                    RegisterStep.NAME -> {
-                        Text(
-                            "DEVICE NAME",
-                            fontFamily = PressStart2P,
-                            fontSize = 7.sp,
-                            color = KvDim,
-                        )
-                        KvInput(
-                            value = name,
-                            onValueChange = onNameChange,
-                            placeholder = "pixel pro",
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
-                if (error.isNotBlank()) {
-                    Text(error, fontFamily = VT323, fontSize = 15.sp, color = KvDanger)
-                }
-            }
-        },
-        confirmButton = {
-            if (step == RegisterStep.NAME) {
-                KvButton(
-                    text = if (busy) "…" else "REGISTER",
-                    onClick = onConfirm,
-                    enabled = !busy && name.isNotBlank(),
-                )
-            }
-        },
-        dismissButton = {
-            if (step == RegisterStep.NAME) {
-                KvButtonOutline(
-                    text = "CANCEL",
-                    onClick = onDismiss,
-                    enabled = !busy,
-                )
-            }
-        },
-        containerColor = Color(0xFF0C120C),
-        titleContentColor = KvAccent,
-        textContentColor = KvInk,
-    )
-}
 
 @Composable
 private fun DeviceRow(device: DeviceItem, onDelete: () -> Unit) {
