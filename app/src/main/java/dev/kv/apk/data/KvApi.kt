@@ -11,6 +11,7 @@ import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 const val BASE_URL = "https://kv.osmosis.page/"
 
@@ -272,6 +273,8 @@ data class CreateSessionRequestResponse(
     val id: String,
     val url: String,
     @SerializedName("expires_at") val expiresAt: String,
+    // Secret held only by this requester; required to poll for the session token.
+    @SerializedName("poll_secret") val pollSecret: String,
 )
 
 data class SessionRequestStatus(
@@ -284,7 +287,10 @@ interface KvUnauthApi {
     suspend fun createSessionRequest(@Body body: CreateSessionRequestBody): CreateSessionRequestResponse
 
     @GET("api/session-request/{id}/status")
-    suspend fun pollStatus(@Path("id") id: String): SessionRequestStatus
+    suspend fun pollStatus(
+        @Path("id") id: String,
+        @Query("secret") secret: String,
+    ): SessionRequestStatus
 }
 
 fun buildUnauthApi(): KvUnauthApi = Retrofit.Builder()

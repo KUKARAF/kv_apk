@@ -112,6 +112,7 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
     var durationMenuExpanded by remember { mutableStateOf(false) }
     var approvalUrl by remember { mutableStateOf("") }
     var requestId by remember { mutableStateOf("") }
+    var pollSecret by remember { mutableStateOf("") }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -128,7 +129,7 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
         while (true) {
             delay(5_000)
             try {
-                val status = unauthApi.pollStatus(requestId)
+                val status = unauthApi.pollStatus(requestId, pollSecret)
                 when (status.status) {
                     "approved" -> {
                         val token = status.sessionToken ?: run {
@@ -351,6 +352,9 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                                                     )
                                                 )
                                                 approvalUrl = result.url
+                                                // Set the secret before requestId so the polling
+                                                // LaunchedEffect(requestId) has it on first tick.
+                                                pollSecret = result.pollSecret
                                                 requestId = result.id
                                                 // QR encodes the deep link so the KV app opens directly on scan
                                                 val deepLink = "kvapp://session-request?id=${result.id}"
