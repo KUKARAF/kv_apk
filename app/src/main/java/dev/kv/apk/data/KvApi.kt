@@ -165,6 +165,47 @@ data class DeviceRegistrationRequest(
 
 data class DeviceRegistrationResponse(val id: String)
 
+data class ManagementKeyRow(
+    val id: String,
+    val provider: String,
+    val label: String,
+    val status: String,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("last_used_at") val lastUsedAt: String? = null,
+)
+
+data class CreateManagementKeyRequest(
+    val provider: String,
+    val label: String,
+    val nonce: String,
+    val ciphertext: String,
+    val aad: String,
+    val recipients: List<DeviceKvRecipientRequest>,
+)
+
+data class CreateManagementKeyResponse(val id: String)
+
+data class ProvisionedKeyRow(
+    val id: String,
+    val provider: String,
+    @SerializedName("provider_key_id") val providerKeyId: String,
+    val label: String,
+    val status: String,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("revoked_at") val revokedAt: String? = null,
+)
+
+data class CreateProvisionedKeyRequest(
+    @SerializedName("provider_key_id") val providerKeyId: String,
+    val label: String,
+    val nonce: String,
+    val ciphertext: String,
+    val aad: String,
+    val recipients: List<DeviceKvRecipientRequest>,
+)
+
+data class CreateProvisionedKeyResponse(val id: String)
+
 interface KvApi {
     @GET("api/admin/approvals")
     suspend fun listApprovals(): List<ApprovalItem>
@@ -249,6 +290,43 @@ interface KvApi {
 
     @POST("api/admin/kv/device")
     suspend fun setDeviceKvEntry(@Body body: ReEncryptRequest): Response<Unit>
+
+    @POST("api/admin/management-keys")
+    suspend fun createManagementKey(@Body body: CreateManagementKeyRequest): Response<CreateManagementKeyResponse>
+
+    @GET("api/admin/management-keys")
+    suspend fun listManagementKeys(): List<ManagementKeyRow>
+
+    @GET("api/admin/management-keys/{id}/devices/{deviceId}")
+    suspend fun getManagementKeyEnvelope(
+        @Path("id") id: String,
+        @Path("deviceId") deviceId: String,
+    ): DeviceKvPayload
+
+    @POST("api/admin/management-keys/{id}/revoke")
+    suspend fun revokeManagementKey(@Path("id") id: String): Response<Unit>
+
+    @POST("api/admin/management-keys/{id}/provisioned-keys")
+    suspend fun createProvisionedKey(
+        @Path("id") id: String,
+        @Body body: CreateProvisionedKeyRequest,
+    ): Response<CreateProvisionedKeyResponse>
+
+    @GET("api/admin/management-keys/{id}/provisioned-keys")
+    suspend fun listProvisionedKeys(@Path("id") id: String): List<ProvisionedKeyRow>
+
+    @GET("api/admin/management-keys/{id}/provisioned-keys/{pkId}/devices/{deviceId}")
+    suspend fun getProvisionedKeyEnvelope(
+        @Path("id") id: String,
+        @Path("pkId") pkId: String,
+        @Path("deviceId") deviceId: String,
+    ): DeviceKvPayload
+
+    @POST("api/admin/management-keys/{id}/provisioned-keys/{pkId}/revoke")
+    suspend fun revokeProvisionedKey(
+        @Path("id") id: String,
+        @Path("pkId") pkId: String,
+    ): Response<Unit>
 }
 
 data class ApproveSessionRequestBody(

@@ -37,6 +37,7 @@ import dev.kv.apk.ui.HomeScreen
 import dev.kv.apk.ui.HomeTile
 import dev.kv.apk.ui.KeysScreen
 import dev.kv.apk.ui.KvEntriesScreen
+import dev.kv.apk.ui.ManagementKeysScreen
 import dev.kv.apk.ui.RateLimitsScreen
 import dev.kv.apk.ui.RegisterDeviceDialog
 import dev.kv.apk.ui.RegisterStep
@@ -220,6 +221,11 @@ private fun MainContent(
                     desc = "one-time encrypted link",
                     onClick = { screen = "share" },
                 ),
+                HomeTile(
+                    n = "09", title = "MANAGEMENT KEYS",
+                    desc = "provider api key management",
+                    onClick = { screen = "mgmtkeys" },
+                ),
             ),
         )
 
@@ -244,6 +250,8 @@ private fun MainContent(
         "session" -> SessionScreen(api = api, onBack = back, onLogout = onLogout)
 
         "share" -> SecureShareScreen(api = api, onBack = back, onLogout = onTokenExpired)
+
+        "mgmtkeys" -> ManagementKeysScreen(api = api, prefs = prefs, onBack = back, onLogout = onTokenExpired)
 
         else -> if (screen.startsWith("approve:")) {
             val requestId = screen.removePrefix("approve:")
