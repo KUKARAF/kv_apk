@@ -33,11 +33,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.CreateKvRequest
 import dev.kv.apk.data.DeviceItem
+import dev.kv.apk.data.DeviceKvPayload
 import dev.kv.apk.data.DeviceKvRecipientRequest
 import dev.kv.apk.data.KvApi
 import dev.kv.apk.data.KvEntryItem
+import dev.kv.apk.data.ManagementKeyRow
+import dev.kv.apk.data.OpenRouterApi
+import dev.kv.apk.data.OpenRouterCreateKeyRequest
 import dev.kv.apk.data.Prefs
 import dev.kv.apk.data.ReEncryptRequest
+import dev.kv.apk.data.buildOpenRouterApi
 import dev.kv.apk.ui.theme.KvAccent
 import dev.kv.apk.ui.theme.KvBg
 import dev.kv.apk.ui.theme.KvDanger
@@ -272,6 +277,68 @@ private fun decryptDeviceKv(
     return String(plaintext, Charsets.UTF_8)
 }
 
+private fun ByteArray.zero() {
+    java.util.Arrays.fill(this, 0)
+}
+
+// Byte-array variant of decryptDeviceKv, for secrets (a management key) that are only ever
+// needed as a single short-lived Authorization header value, never displayed — callers must
+// zero() the result in a finally block once done, same discipline as ManagementKeysScreen.kt.
+private fun decryptDeviceKvBytes(privKeyPkcs8B64: String, payload: DeviceKvPayload): ByteArray {
+    val kf = KeyFactory.getInstance("EC")
+    val myPrivKey = kf.generatePrivate(
+        PKCS8EncodedKeySpec(Base64.decode(privKeyPkcs8B64, Base64.DEFAULT))
+    )
+
+    val rawEphPub = Base64.decode(payload.recipient.ephemeralPub, Base64.DEFAULT)
+    val spki = P256_SPKI_HEADER + rawEphPub
+    val ephPubKey = kf.generatePublic(X509EncodedKeySpec(spki))
+
+    val ka = KeyAgreement.getInstance("ECDH")
+    ka.init(myPrivKey)
+    ka.doPhase(ephPubKey, true)
+    val sharedSecret = ka.generateSecret()
+
+    val wrapKey = hkdf(
+        secret = sharedSecret,
+        salt = ByteArray(32),
+        info = "kv-device-wrap".toByteArray(Charsets.UTF_8),
+        length = 32,
+    )
+
+    val dek = aesGcmDecrypt(
+        key = wrapKey,
+        nonce = Base64.decode(payload.recipient.dekNonce, Base64.DEFAULT),
+        ciphertext = Base64.decode(payload.recipient.encryptedDek, Base64.DEFAULT),
+        aad = ByteArray(0),
+    )
+
+    return aesGcmDecrypt(
+        key = dek,
+        nonce = Base64.decode(payload.nonce, Base64.DEFAULT),
+        ciphertext = Base64.decode(payload.ciphertext, Base64.DEFAULT),
+        aad = Base64.decode(payload.aad, Base64.DEFAULT),
+    )
+}
+
+private suspend fun decryptManagementKeyBytes(api: KvApi, prefs: Prefs, managementKeyId: String): ByteArray {
+    val payload = api.getManagementKeyEnvelope(managementKeyId, prefs.deviceId)
+    return decryptDeviceKvBytes(prefs.devicePrivKeyPkcs8, payload)
+}
+
+// Android's INTERNET permission has no per-host allowlist, so this is the enforcement point:
+// a management key's decrypted secret is only ever sent to the host registered for its own
+// `provider` field, never to an arbitrary or mismatched provider's API.
+private fun providerApiFor(provider: String): OpenRouterApi? = when (provider) {
+    "openrouter" -> buildOpenRouterApi()
+    else -> null
+}
+
+private fun providerDisplayName(provider: String): String = when (provider) {
+    "openrouter" -> "OpenRouter"
+    else -> provider
+}
+
 @Composable
 fun KvEntriesScreen(
     api: KvApi,
@@ -293,6 +360,12 @@ fun KvEntriesScreen(
     var kvOneTime by remember { mutableStateOf(false) }
     var kvApproval by remember { mutableStateOf(false) }
     var kvZeroTrust by remember { mutableStateOf(false) }
+
+    // Generate the value from a provider via a stored management key, instead of typing it.
+    var managementKeys by remember { mutableStateOf<List<ManagementKeyRow>>(emptyList()) }
+    var generateViaManagementKeyId by remember { mutableStateOf<String?>(null) }
+    var generateBusy by remember { mutableStateOf(false) }
+    var generateError by remember { mutableStateOf("") }
 
     var genLinkDesc by remember { mutableStateOf("") }
 
@@ -319,7 +392,10 @@ fun KvEntriesScreen(
         }
     }
 
-    LaunchedEffect(Unit) { loadEntries() }
+    LaunchedEffect(Unit) {
+        loadEntries()
+        try { managementKeys = api.listManagementKeys() } catch (_: Exception) {}
+    }
 
     val filtered = if (search.isBlank()) entries
     else entries.filter { it.key.uppercase().startsWith(search.uppercase()) }
@@ -356,16 +432,43 @@ fun KvEntriesScreen(
 
                             KvLabel("VALUE")
                             KvInput(
-                                value = kvValue,
+                                value = if (generateViaManagementKeyId != null) "" else kvValue,
                                 onValueChange = { kvValue = it },
-                                placeholder = "the value…",
+                                placeholder = if (generateViaManagementKeyId != null)
+                                    "will be generated on save…" else "the value…",
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(bottom = 13.dp),
                                 singleLine = false,
                                 maxLines = 4,
                                 fontSize = 17,
+                                enabled = generateViaManagementKeyId == null,
                             )
+
+                            val activeManagementKeys = managementKeys.filter { it.status == "active" }
+                            if (activeManagementKeys.isNotEmpty()) {
+                                Column(
+                                    modifier = Modifier.padding(bottom = 13.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    KvLabel("GENERATE VALUE VIA")
+                                    activeManagementKeys.forEach { mk ->
+                                        KvCheckbox(
+                                            checked = generateViaManagementKeyId == mk.id,
+                                            label = providerDisplayName(mk.provider) +
+                                                if (activeManagementKeys.size > 1) " (${mk.label})" else "",
+                                            onToggle = {
+                                                generateError = ""
+                                                generateViaManagementKeyId =
+                                                    if (generateViaManagementKeyId == mk.id) null else mk.id
+                                            },
+                                        )
+                                    }
+                                    if (generateError.isNotBlank()) {
+                                        Text(generateError, fontFamily = VT323, fontSize = 15.sp, color = KvDanger)
+                                    }
+                                }
+                            }
 
                             KvLabel("TTL (H)")
                             KvInput(
@@ -414,15 +517,54 @@ fun KvEntriesScreen(
                             }
 
                             KvButton(
-                                text = "SAVE",
-                                enabled = kvKey.isNotBlank() && kvValue.isNotBlank(),
+                                text = if (generateBusy) "…" else "SAVE",
+                                enabled = !generateBusy && kvKey.isNotBlank() &&
+                                    (kvValue.isNotBlank() || generateViaManagementKeyId != null),
                                 onClick = {
                                     scope.launch {
+                                        generateError = ""
+                                        val mgmtKeyId = generateViaManagementKeyId
+                                        val valueToSave: String
+                                        if (mgmtKeyId != null) {
+                                            generateBusy = true
+                                            val mk = managementKeys.find { it.id == mgmtKeyId }
+                                            val provider = mk?.let { providerApiFor(it.provider) }
+                                            if (mk == null || provider == null) {
+                                                generateError = "unsupported provider"
+                                                generateBusy = false
+                                                return@launch
+                                            }
+                                            val generated = try {
+                                                val mgmtSecretBytes =
+                                                    decryptManagementKeyBytes(api, prefs, mgmtKeyId)
+                                                try {
+                                                    provider.createKey(
+                                                        "Bearer " + String(mgmtSecretBytes, Charsets.UTF_8),
+                                                        OpenRouterCreateKeyRequest(name = kvKey.trim()),
+                                                    ).key
+                                                } finally {
+                                                    mgmtSecretBytes.zero()
+                                                }
+                                            } catch (e: retrofit2.HttpException) {
+                                                if (e.code() == 401) { onLogout(); generateBusy = false; return@launch }
+                                                generateError = "provider error ${e.code()}"
+                                                generateBusy = false
+                                                return@launch
+                                            } catch (e: Exception) {
+                                                generateError = e.message ?: "failed to generate key"
+                                                generateBusy = false
+                                                return@launch
+                                            }
+                                            valueToSave = generated
+                                        } else {
+                                            valueToSave = kvValue
+                                        }
+
                                         try {
                                             api.setKvEntry(
                                                 CreateKvRequest(
                                                     key = kvKey.trim(),
-                                                    value = kvValue,
+                                                    value = valueToSave,
                                                     ttl = kvTtl.toIntOrNull(),
                                                     sliding = kvSliding,
                                                     openAccess = kvOpenAccess,
@@ -434,12 +576,15 @@ fun KvEntriesScreen(
                                             toast = "saved ${kvKey.trim()}"
                                             kvKey = ""
                                             kvValue = ""
+                                            generateViaManagementKeyId = null
                                             loadEntries()
                                         } catch (e: retrofit2.HttpException) {
                                             if (e.code() == 401) onLogout()
                                             else toast = "error ${e.code()}"
                                         } catch (e: Exception) {
                                             toast = e.message ?: "error"
+                                        } finally {
+                                            generateBusy = false
                                         }
                                     }
                                 },

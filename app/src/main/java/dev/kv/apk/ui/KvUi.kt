@@ -163,12 +163,14 @@ fun KvInput(
     singleLine: Boolean = true,
     maxLines: Int = 1,
     fontSize: Int = 18,
+    enabled: Boolean = true,
 ) {
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
+        enabled = enabled,
         modifier = modifier
-            .background(Color(0xFF070D07), RoundedCornerShape(2.dp))
+            .background(if (enabled) Color(0xFF070D07) else Color(0xFF0A0A0A), RoundedCornerShape(2.dp))
             .border(1.dp, KvFaint, RoundedCornerShape(2.dp))
             .padding(horizontal = 10.dp, vertical = 9.dp),
         singleLine = singleLine,
@@ -177,7 +179,7 @@ fun KvInput(
         visualTransformation = visualTransformation,
         cursorBrush = SolidColor(KvAccent),
         textStyle = TextStyle(
-            color = KvInk,
+            color = if (enabled) KvInk else KvDim,
             fontFamily = VT323,
             fontSize = fontSize.sp,
         ),
