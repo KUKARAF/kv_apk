@@ -48,10 +48,12 @@ import dev.kv.apk.ui.theme.KvOrange
 import dev.kv.apk.ui.theme.PressStart2P
 import dev.kv.apk.ui.theme.VT323
 import kotlinx.coroutines.launch
+import android.os.Build
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.SecureRandom
 import java.security.spec.ECGenParameterSpec
+import java.security.spec.NamedParameterSpec
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
@@ -110,9 +112,6 @@ private fun encryptForDevices(
     devices: List<DeviceItem>,
 ): ReEncryptRequest {
     val rng = SecureRandom()
-    val kf = KeyFactory.getInstance("EC")
-    val kpg = KeyPairGenerator.getInstance("EC")
-    kpg.initialize(ECGenParameterSpec("secp256r1"))
 
     val dek = ByteArray(32).also { rng.nextBytes(it) }
     val nonce = ByteArray(12).also { rng.nextBytes(it) }
@@ -120,35 +119,37 @@ private fun encryptForDevices(
     val ciphertext = aesGcmEncrypt(dek, nonce, plaintext.toByteArray(Charsets.UTF_8), aadBytes)
 
     val recipients = devices.mapNotNull { device ->
-        val pubKeyBytes = Base64.decode(device.publicKey ?: return@mapNotNull null, Base64.DEFAULT)
-        val devicePubKey = kf.generatePublic(X509EncodedKeySpec(pubKeyBytes))
+        try {
+            val pubKeyBytes = Base64.decode(device.publicKey ?: return@mapNotNull null, Base64.DEFAULT)
+            val keyType = device.keyType ?: "p256"
+            val (sharedSecret, rawEphPub) = ecdhWrap(keyType, pubKeyBytes)
 
-        val ephKp = kpg.generateKeyPair()
-        val ka = KeyAgreement.getInstance("ECDH")
-        ka.init(ephKp.private)
-        ka.doPhase(devicePubKey, true)
-        val sharedSecret = ka.generateSecret()
+            val wrapKey = hkdf(
+                secret = sharedSecret,
+                salt = ByteArray(32),
+                info = "kv-device-wrap".toByteArray(Charsets.UTF_8),
+                length = 32,
+            )
 
-        val wrapKey = hkdf(
-            secret = sharedSecret,
-            salt = ByteArray(32),
-            info = "kv-device-wrap".toByteArray(Charsets.UTF_8),
-            length = 32,
-        )
+            val dekNonce = ByteArray(12).also { rng.nextBytes(it) }
+            val encryptedDek = aesGcmEncrypt(wrapKey, dekNonce, dek, ByteArray(0))
 
-        val dekNonce = ByteArray(12).also { rng.nextBytes(it) }
-        val encryptedDek = aesGcmEncrypt(wrapKey, dekNonce, dek, ByteArray(0))
+            DeviceKvRecipientRequest(
+                deviceId = device.id,
+                keyType = keyType,
+                ephemeralPub = Base64.encodeToString(rawEphPub, Base64.NO_WRAP),
+                dekNonce = Base64.encodeToString(dekNonce, Base64.NO_WRAP),
+                encryptedDek = Base64.encodeToString(encryptedDek, Base64.NO_WRAP),
+            )
+        } catch (e: Exception) {
+            // Skip a device we can't encrypt for (unsupported key type, malformed key,
+            // Android too old for X25519) rather than failing the whole request.
+            null
+        }
+    }
 
-        // SPKI-encoded public key: strip the 26-byte header to get the raw 65-byte point
-        val rawEphPub = ephKp.public.encoded.drop(P256_SPKI_HEADER.size).toByteArray()
-
-        DeviceKvRecipientRequest(
-            deviceId = device.id,
-            keyType = device.keyType ?: "p256",
-            ephemeralPub = Base64.encodeToString(rawEphPub, Base64.NO_WRAP),
-            dekNonce = Base64.encodeToString(dekNonce, Base64.NO_WRAP),
-            encryptedDek = Base64.encodeToString(encryptedDek, Base64.NO_WRAP),
-        )
+    if (recipients.isEmpty()) {
+        throw IllegalStateException("failed to encrypt for any selected device")
     }
 
     return ReEncryptRequest(
@@ -161,7 +162,6 @@ private fun encryptForDevices(
 }
 
 // P-256 SPKI header (26 bytes): prepend before the 65-byte uncompressed EC point
-
 private val P256_SPKI_HEADER = byteArrayOf(
     0x30, 0x59.toByte(),
     0x30, 0x13,
@@ -169,6 +169,54 @@ private val P256_SPKI_HEADER = byteArrayOf(
     0x06, 0x08, 0x2a, 0x86.toByte(), 0x48, 0xce.toByte(), 0x3d, 0x03, 0x01, 0x07,
     0x03, 0x42, 0x00,
 )
+
+// X25519 SPKI header (12 bytes, RFC 8410): prepend before the raw 32-byte point.
+// Registered via kv_cli (key_type "x25519"), whose public_key is stored raw, unlike
+// P-256 devices whose public_key is already SPKI-DER-encoded.
+private val X25519_SPKI_HEADER = byteArrayOf(
+    0x30, 0x2a,
+    0x30, 0x05,
+    0x06, 0x03, 0x2b, 0x65.toByte(), 0x6e,
+    0x03, 0x21, 0x00,
+)
+
+// ECDH for a device's registered public key, keyed off its key_type — "p256" (SPKI-DER-encoded
+// public_key, matches this device's own registration) or "x25519" (raw 32-byte public_key,
+// registered via kv_cli — kv_apk isn't the only client). Returns (sharedSecret, rawEphemeralPub).
+private fun ecdhWrap(keyType: String, devicePubKeyBytes: ByteArray): Pair<ByteArray, ByteArray> {
+    return when (keyType) {
+        "x25519" -> {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                throw UnsupportedOperationException("X25519 requires Android 9 (API 28) or newer")
+            }
+            val devicePubKey = KeyFactory.getInstance("XDH")
+                .generatePublic(X509EncodedKeySpec(X25519_SPKI_HEADER + devicePubKeyBytes))
+            val ephKp = KeyPairGenerator.getInstance("XDH")
+                .apply { initialize(NamedParameterSpec.X25519) }
+                .generateKeyPair()
+            val ka = KeyAgreement.getInstance("XDH")
+            ka.init(ephKp.private)
+            ka.doPhase(devicePubKey, true)
+            val sharedSecret = ka.generateSecret()
+            val rawEphPub = ephKp.public.encoded.drop(X25519_SPKI_HEADER.size).toByteArray()
+            sharedSecret to rawEphPub
+        }
+        "p256" -> {
+            val devicePubKey = KeyFactory.getInstance("EC")
+                .generatePublic(X509EncodedKeySpec(devicePubKeyBytes))
+            val ephKp = KeyPairGenerator.getInstance("EC")
+                .apply { initialize(ECGenParameterSpec("secp256r1")) }
+                .generateKeyPair()
+            val ka = KeyAgreement.getInstance("ECDH")
+            ka.init(ephKp.private)
+            ka.doPhase(devicePubKey, true)
+            val sharedSecret = ka.generateSecret()
+            val rawEphPub = ephKp.public.encoded.drop(P256_SPKI_HEADER.size).toByteArray()
+            sharedSecret to rawEphPub
+        }
+        else -> throw UnsupportedOperationException("unsupported device key type: $keyType")
+    }
+}
 
 private fun decryptDeviceKv(
     privKeyPkcs8B64: String,
