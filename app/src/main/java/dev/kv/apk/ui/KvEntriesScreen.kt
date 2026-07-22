@@ -40,6 +40,7 @@ import dev.kv.apk.data.KvEntryItem
 import dev.kv.apk.data.ManagementKeyRow
 import dev.kv.apk.data.OpenRouterApi
 import dev.kv.apk.data.OpenRouterCreateKeyRequest
+import dev.kv.apk.data.OpenRouterUpdateKeyRequest
 import dev.kv.apk.data.Prefs
 import dev.kv.apk.data.ReEncryptRequest
 import dev.kv.apk.data.buildOpenRouterApi
@@ -538,10 +539,23 @@ fun KvEntriesScreen(
                                                 val mgmtSecretBytes =
                                                     decryptManagementKeyBytes(api, prefs, mgmtKeyId)
                                                 try {
-                                                    provider.createKey(
-                                                        "Bearer " + String(mgmtSecretBytes, Charsets.UTF_8),
-                                                        OpenRouterCreateKeyRequest(name = kvKey.trim()),
-                                                    ).key
+                                                    val auth = "Bearer " + String(mgmtSecretBytes, Charsets.UTF_8)
+                                                    val created = provider.createKey(
+                                                        auth,
+                                                        OpenRouterCreateKeyRequest(
+                                                            name = kvKey.trim(),
+                                                            limit = mk.defaultLimit,
+                                                        ),
+                                                    )
+                                                    // Per OpenRouter's docs, limit_reset is only
+                                                    // documented on the update (PATCH) endpoint.
+                                                    mk.defaultLimitReset?.let { reset ->
+                                                        provider.updateKey(
+                                                            auth, created.data.keyId,
+                                                            OpenRouterUpdateKeyRequest(reset),
+                                                        )
+                                                    }
+                                                    created.key
                                                 } finally {
                                                     mgmtSecretBytes.zero()
                                                 }

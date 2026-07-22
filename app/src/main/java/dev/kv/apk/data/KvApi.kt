@@ -9,6 +9,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -172,6 +173,8 @@ data class ManagementKeyRow(
     val status: String,
     @SerializedName("created_at") val createdAt: String,
     @SerializedName("last_used_at") val lastUsedAt: String? = null,
+    @SerializedName("default_limit") val defaultLimit: Double? = null,
+    @SerializedName("default_limit_reset") val defaultLimitReset: String? = null,
 )
 
 data class CreateManagementKeyRequest(
@@ -181,6 +184,13 @@ data class CreateManagementKeyRequest(
     val ciphertext: String,
     val aad: String,
     val recipients: List<DeviceKvRecipientRequest>,
+    @SerializedName("default_limit") val defaultLimit: Double? = null,
+    @SerializedName("default_limit_reset") val defaultLimitReset: String? = null,
+)
+
+data class UpdateManagementKeyDefaultsRequest(
+    @SerializedName("default_limit") val defaultLimit: Double?,
+    @SerializedName("default_limit_reset") val defaultLimitReset: String?,
 )
 
 data class CreateManagementKeyResponse(val id: String)
@@ -305,6 +315,12 @@ interface KvApi {
 
     @POST("api/admin/management-keys/{id}/revoke")
     suspend fun revokeManagementKey(@Path("id") id: String): Response<Unit>
+
+    @PATCH("api/admin/management-keys/{id}")
+    suspend fun updateManagementKeyDefaults(
+        @Path("id") id: String,
+        @Body body: UpdateManagementKeyDefaultsRequest,
+    ): Response<Unit>
 
     @POST("api/admin/management-keys/{id}/provisioned-keys")
     suspend fun createProvisionedKey(

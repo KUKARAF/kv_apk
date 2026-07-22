@@ -46,9 +46,11 @@ import dev.kv.apk.data.KvApi
 import dev.kv.apk.data.ManagementKeyRow
 import dev.kv.apk.data.OpenRouterCreateKeyRequest
 import dev.kv.apk.data.OpenRouterKeyData
+import dev.kv.apk.data.OpenRouterUpdateKeyRequest
 import dev.kv.apk.data.Prefs
 import dev.kv.apk.data.ProvisionedKeyRow
 import dev.kv.apk.data.OpenRouterApi
+import dev.kv.apk.data.UpdateManagementKeyDefaultsRequest
 import dev.kv.apk.data.buildOpenRouterApi
 import dev.kv.apk.ui.theme.KvAccent
 import dev.kv.apk.ui.theme.KvBg
@@ -355,6 +357,8 @@ fun ManagementKeysScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var addLabel by remember { mutableStateOf("") }
     var addSecret by remember { mutableStateOf("") }
+    var addDefaultLimit by remember { mutableStateOf("") }
+    var addDefaultLimitReset by remember { mutableStateOf<String?>(null) }
     var addSelectedDeviceIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var addBusy by remember { mutableStateOf(false) }
     var addError by remember { mutableStateOf("") }
@@ -376,6 +380,8 @@ fun ManagementKeysScreen(
                                 onClick = {
                                     addLabel = ""
                                     addSecret = ""
+                                    addDefaultLimit = ""
+                                    addDefaultLimitReset = null
                                     addSelectedDeviceIds = emptySet()
                                     addError = ""
                                     showAddDialog = true
@@ -436,6 +442,10 @@ fun ManagementKeysScreen(
                 onBack = { selected = null },
                 onLogout = onLogout,
                 onToast = { toast = it },
+                onDefaultsSaved = { updated ->
+                    selected = updated
+                    loadManagementKeys()
+                },
             )
         }
 
@@ -474,6 +484,28 @@ fun ManagementKeysScreen(
                             visualTransformation = PasswordVisualTransformation(),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
                         )
+                        KvLabel("DEFAULT LIMIT (USD, OPTIONAL)")
+                        KvInput(
+                            value = addDefaultLimit,
+                            onValueChange = { addDefaultLimit = it },
+                            placeholder = "—",
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.padding(bottom = 12.dp),
+                        )
+                        KvLabel("DEFAULT LIMIT RESET")
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            modifier = Modifier.padding(bottom = 12.dp),
+                        ) {
+                            listOf(null to "None", "daily" to "Daily", "weekly" to "Weekly", "monthly" to "Monthly")
+                                .forEach { (value, text) ->
+                                    KvCheckbox(
+                                        checked = addDefaultLimitReset == value,
+                                        label = text,
+                                        onToggle = { addDefaultLimitReset = value },
+                                    )
+                                }
+                        }
                         KvLabel("ENCRYPT FOR DEVICES")
                         if (allDevices.none { it.publicKey != null }) {
                             Text(
@@ -529,6 +561,8 @@ fun ManagementKeysScreen(
                                             ciphertext = envelope.ciphertext,
                                             aad = envelope.aad,
                                             recipients = envelope.recipients,
+                                            defaultLimit = addDefaultLimit.toDoubleOrNull(),
+                                            defaultLimitReset = addDefaultLimitReset,
                                         )
                                     )
                                     if (resp.isSuccessful) {
@@ -579,6 +613,15 @@ private fun ManagementKeyRowView(
             Column(modifier = Modifier.weight(1f)) {
                 Text(row.label, fontFamily = VT323, fontSize = 19.sp, color = KvInk)
                 Text("${row.provider} · ${row.createdAt}", fontFamily = VT323, fontSize = 14.sp, color = KvDim)
+                if (row.defaultLimit != null || row.defaultLimitReset != null) {
+                    Text(
+                        "default: " + (row.defaultLimit?.let { "$$it" } ?: "no limit") +
+                            (row.defaultLimitReset?.let { " / $it" } ?: ""),
+                        fontFamily = VT323,
+                        fontSize = 13.sp,
+                        color = KvDim,
+                    )
+                }
             }
             KvStatusChip(text = row.status.uppercase(), active = row.status == "active")
         }
@@ -602,6 +645,7 @@ private fun ProvisionedKeysView(
     onBack: () -> Unit,
     onLogout: () -> Unit,
     onToast: (String) -> Unit,
+    onDefaultsSaved: (ManagementKeyRow) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -630,6 +674,7 @@ private fun ProvisionedKeysView(
     var showCreateDialog by remember { mutableStateOf(false) }
     var createLabel by remember { mutableStateOf("") }
     var createLimit by remember { mutableStateOf("") }
+    var createLimitReset by remember { mutableStateOf<String?>(null) }
     var createSelectedDeviceIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var createBusy by remember { mutableStateOf(false) }
     var createError by remember { mutableStateOf("") }
@@ -641,24 +686,50 @@ private fun ProvisionedKeysView(
     var revealBusyId by remember { mutableStateOf<String?>(null) }
     var revokeBusyId by remember { mutableStateOf<String?>(null) }
 
+    var showEditDefaultsDialog by remember { mutableStateOf(false) }
+    var editLimit by remember { mutableStateOf("") }
+    var editLimitReset by remember { mutableStateOf<String?>(null) }
+    var editBusy by remember { mutableStateOf(false) }
+    var editError by remember { mutableStateOf("") }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
             KvScreenHeader(
                 title = managementKey.label.uppercase(),
                 onBack = onBack,
                 trailing = {
-                    KvButtonOutline(
-                        text = "ADD KEY",
-                        onClick = {
-                            createLabel = ""
-                            createLimit = ""
-                            createSelectedDeviceIds = emptySet()
-                            createError = ""
-                            showCreateDialog = true
-                        },
-                        color = KvAccent,
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        KvButtonOutline(
+                            text = "DEFAULTS",
+                            onClick = {
+                                editLimit = managementKey.defaultLimit?.toString() ?: ""
+                                editLimitReset = managementKey.defaultLimitReset
+                                editError = ""
+                                showEditDefaultsDialog = true
+                            },
+                            color = KvDim,
+                        )
+                        KvButtonOutline(
+                            text = "ADD KEY",
+                            onClick = {
+                                createLabel = ""
+                                createLimit = managementKey.defaultLimit?.toString() ?: ""
+                                createLimitReset = managementKey.defaultLimitReset
+                                createSelectedDeviceIds = emptySet()
+                                createError = ""
+                                showCreateDialog = true
+                            },
+                            color = KvAccent,
+                        )
+                    }
                 },
+            )
+            Text(
+                "Default: " + (managementKey.defaultLimit?.let { "$$it" } ?: "no limit") +
+                    (managementKey.defaultLimitReset?.let { " / $it" } ?: ""),
+                fontFamily = VT323,
+                fontSize = 14.sp,
+                color = KvDim,
             )
         }
 
@@ -846,6 +917,20 @@ private fun ProvisionedKeysView(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.padding(bottom = 12.dp),
                     )
+                    KvLabel("LIMIT RESET")
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    ) {
+                        listOf(null to "None", "daily" to "Daily", "weekly" to "Weekly", "monthly" to "Monthly")
+                            .forEach { (value, text) ->
+                                KvCheckbox(
+                                    checked = createLimitReset == value,
+                                    label = text,
+                                    onToggle = { createLimitReset = value },
+                                )
+                            }
+                    }
                     KvLabel("ENCRYPT FOR DEVICES")
                     if (allDevices.none { it.publicKey != null }) {
                         Text("No devices with public keys registered.", fontFamily = VT323, fontSize = 15.sp, color = KvDim)
@@ -884,13 +969,20 @@ private fun ProvisionedKeysView(
                                 }
                                 val mgmtSecretBytes = decryptManagementKeyBytes(api, prefs, managementKey.id)
                                 val created = try {
-                                    provider.createKey(
-                                        "Bearer " + String(mgmtSecretBytes, Charsets.UTF_8),
+                                    val auth = "Bearer " + String(mgmtSecretBytes, Charsets.UTF_8)
+                                    val result = provider.createKey(
+                                        auth,
                                         OpenRouterCreateKeyRequest(
                                             name = createLabel.trim(),
                                             limit = createLimit.toDoubleOrNull(),
                                         ),
                                     )
+                                    // Per OpenRouter's docs, limit_reset is only documented on the
+                                    // update (PATCH) endpoint, not on create.
+                                    createLimitReset?.let { reset ->
+                                        provider.updateKey(auth, result.data.keyId, OpenRouterUpdateKeyRequest(reset))
+                                    }
+                                    result
                                 } finally {
                                     mgmtSecretBytes.zero()
                                 }
@@ -932,6 +1024,92 @@ private fun ProvisionedKeysView(
             },
             dismissButton = {
                 KvButtonOutline(text = "CANCEL", onClick = { showCreateDialog = false }, enabled = !createBusy)
+            },
+            containerColor = Color(0xFF0C120C),
+            titleContentColor = KvAccent,
+            textContentColor = KvInk,
+        )
+    }
+
+    if (showEditDefaultsDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!editBusy) showEditDefaultsDialog = false },
+            title = { Text("DEFAULT LIMIT", fontFamily = PressStart2P, fontSize = 9.sp, color = KvAccent) },
+            text = {
+                Column {
+                    Text(
+                        "Applied automatically whenever a key is generated via this management key, from here or the KV entries quick-generate checkbox.",
+                        fontFamily = VT323,
+                        fontSize = 15.sp,
+                        color = KvDim,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                    KvLabel("LIMIT (USD, OPTIONAL)")
+                    KvInput(
+                        value = editLimit,
+                        onValueChange = { editLimit = it },
+                        placeholder = "—",
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                    KvLabel("LIMIT RESET")
+                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        listOf(null to "None", "daily" to "Daily", "weekly" to "Weekly", "monthly" to "Monthly")
+                            .forEach { (value, text) ->
+                                KvCheckbox(
+                                    checked = editLimitReset == value,
+                                    label = text,
+                                    onToggle = { editLimitReset = value },
+                                )
+                            }
+                    }
+                    if (editError.isNotBlank()) {
+                        Text(editError, fontFamily = VT323, fontSize = 15.sp, color = KvDanger, modifier = Modifier.padding(top = 10.dp))
+                    }
+                }
+            },
+            confirmButton = {
+                KvButton(
+                    text = if (editBusy) "…" else "SAVE",
+                    enabled = !editBusy,
+                    onClick = {
+                        scope.launch {
+                            editBusy = true
+                            editError = ""
+                            try {
+                                val newLimit = editLimit.toDoubleOrNull()
+                                val resp = api.updateManagementKeyDefaults(
+                                    managementKey.id,
+                                    UpdateManagementKeyDefaultsRequest(
+                                        defaultLimit = newLimit,
+                                        defaultLimitReset = editLimitReset,
+                                    ),
+                                )
+                                if (resp.isSuccessful) {
+                                    showEditDefaultsDialog = false
+                                    onDefaultsSaved(
+                                        managementKey.copy(
+                                            defaultLimit = newLimit,
+                                            defaultLimitReset = editLimitReset,
+                                        )
+                                    )
+                                    onToast("defaults updated")
+                                } else {
+                                    editError = "failed: HTTP ${resp.code()}"
+                                }
+                            } catch (e: retrofit2.HttpException) {
+                                handleHttpError(e)
+                            } catch (e: Exception) {
+                                editError = e.message ?: "failed"
+                            } finally {
+                                editBusy = false
+                            }
+                        }
+                    },
+                )
+            },
+            dismissButton = {
+                KvButtonOutline(text = "CANCEL", onClick = { showEditDefaultsDialog = false }, enabled = !editBusy)
             },
             containerColor = Color(0xFF0C120C),
             titleContentColor = KvAccent,
