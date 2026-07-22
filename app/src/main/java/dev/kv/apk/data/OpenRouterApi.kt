@@ -41,7 +41,7 @@ interface OpenRouterApi {
     @GET("api/v1/keys")
     suspend fun listKeys(@Header("Authorization") auth: String): OpenRouterListResponse
 
-    @POST("api/v1/keys/")
+    @POST("api/v1/keys")
     suspend fun createKey(
         @Header("Authorization") auth: String,
         @Body body: OpenRouterCreateKeyRequest,
