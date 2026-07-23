@@ -678,6 +678,11 @@ private fun ProvisionedKeysView(
     var createSelectedDeviceIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var createBusy by remember { mutableStateOf(false) }
     var createError by remember { mutableStateOf("") }
+    // When set, the create dialog is in "rotate" mode: delete this provider/local key first,
+    // then fall through to the normal create flow with the pre-filled label/limit/reset below.
+    var rotateSourceProviderKeyId by remember { mutableStateOf<String?>(null) }
+    var rotateSourceLocalId by remember { mutableStateOf<String?>(null) }
+    var rotateBusyId by remember { mutableStateOf<String?>(null) }
 
     // Newly-created plaintext secret, shown once
     var createdSecret by remember { mutableStateOf<String?>(null) }
@@ -717,6 +722,8 @@ private fun ProvisionedKeysView(
                                 createLimitReset = managementKey.defaultLimitReset
                                 createSelectedDeviceIds = emptySet()
                                 createError = ""
+                                rotateSourceProviderKeyId = null
+                                rotateSourceLocalId = null
                                 showCreateDialog = true
                             },
                             color = KvAccent,
@@ -849,6 +856,46 @@ private fun ProvisionedKeysView(
                                 },
                             )
                             if (pk.status == "active") {
+                                KvButtonOutline(
+                                    text = if (rotateBusyId == pk.id) "…" else "ROTATE",
+                                    enabled = rotateBusyId == null,
+                                    color = KvDim,
+                                    onClick = {
+                                        scope.launch {
+                                            rotateBusyId = pk.id
+                                            try {
+                                                val provider = providerApiFor(managementKey.provider)
+                                                if (provider == null) {
+                                                    onToast("Unsupported provider: ${managementKey.provider}")
+                                                    return@launch
+                                                }
+                                                // Read the key's *current* limit/limit_reset from the
+                                                // provider itself — not our stored defaults, which may
+                                                // be stale or never matched this specific key.
+                                                val mgmtSecretBytes = decryptManagementKeyBytes(api, prefs, managementKey.id)
+                                                val info = try {
+                                                    provider.getKey("Bearer " + String(mgmtSecretBytes, Charsets.UTF_8), pk.providerKeyId).data
+                                                } finally {
+                                                    mgmtSecretBytes.zero()
+                                                }
+                                                createLabel = info.name
+                                                createLimit = info.limit?.toString() ?: ""
+                                                createLimitReset = info.limitReset
+                                                createSelectedDeviceIds = emptySet()
+                                                createError = ""
+                                                rotateSourceProviderKeyId = pk.providerKeyId
+                                                rotateSourceLocalId = pk.id
+                                                showCreateDialog = true
+                                            } catch (e: retrofit2.HttpException) {
+                                                handleHttpError(e)
+                                            } catch (e: Exception) {
+                                                onToast(e.message ?: "failed to fetch current key info from provider")
+                                            } finally {
+                                                rotateBusyId = null
+                                            }
+                                        }
+                                    },
+                                )
                                 KvButtonDanger(
                                     text = if (revokeBusyId == pk.id) "…" else "REVOKE",
                                     onClick = {
@@ -890,13 +937,28 @@ private fun ProvisionedKeysView(
     }
 
     if (showCreateDialog) {
+        val isRotate = rotateSourceProviderKeyId != null
         AlertDialog(
-            onDismissRequest = { if (!createBusy) showCreateDialog = false },
-            title = { Text("GENERATE KEY", fontFamily = PressStart2P, fontSize = 9.sp, color = KvAccent) },
+            onDismissRequest = {
+                if (!createBusy) {
+                    showCreateDialog = false
+                    rotateSourceProviderKeyId = null
+                    rotateSourceLocalId = null
+                }
+            },
+            title = {
+                Text(
+                    if (isRotate) "ROTATE KEY" else "GENERATE KEY",
+                    fontFamily = PressStart2P, fontSize = 9.sp, color = KvAccent,
+                )
+            },
             text = {
                 Column {
                     Text(
-                        "Calls ${managementKey.provider} directly from this device to create a new API key, then stores it encrypted for the devices you select below.",
+                        if (isRotate)
+                            "Deletes the current key on ${managementKey.provider}, then creates a replacement with this label/limit/reset, encrypted for the devices you select below."
+                        else
+                            "Calls ${managementKey.provider} directly from this device to create a new API key, then stores it encrypted for the devices you select below.",
                         fontFamily = VT323,
                         fontSize = 15.sp,
                         color = KvDim,
@@ -955,7 +1017,7 @@ private fun ProvisionedKeysView(
             },
             confirmButton = {
                 KvButton(
-                    text = if (createBusy) "…" else "GENERATE",
+                    text = if (createBusy) "…" else (if (isRotate) "ROTATE" else "GENERATE"),
                     enabled = !createBusy && createLabel.isNotBlank() && createSelectedDeviceIds.isNotEmpty(),
                     onClick = {
                         scope.launch {
@@ -968,6 +1030,33 @@ private fun ProvisionedKeysView(
                                     return@launch
                                 }
                                 val mgmtSecretBytes = decryptManagementKeyBytes(api, prefs, managementKey.id)
+
+                                // Delete old, then create new: brief window with zero active keys.
+                                // If create-new then fails, that's the accepted risk of this
+                                // ordering, so it must fail loudly (see the catch below).
+                                if (isRotate) {
+                                    val oldProviderKeyId = rotateSourceProviderKeyId!!
+                                    try {
+                                        provider.revokeKey(
+                                            "Bearer " + String(mgmtSecretBytes, Charsets.UTF_8),
+                                            oldProviderKeyId,
+                                        )
+                                    } catch (e: Exception) {
+                                        mgmtSecretBytes.zero()
+                                        createError = "Failed to delete old key on provider — aborting rotation, nothing was changed: ${e.message}"
+                                        return@launch
+                                    }
+                                    // Best-effort: local cleanup of the old record is non-fatal —
+                                    // the user still needs the replacement regardless.
+                                    rotateSourceLocalId?.let { localId ->
+                                        try {
+                                            api.deleteProvisionedKey(managementKey.id, localId)
+                                        } catch (e: Exception) {
+                                            onToast("Deleted old key on provider, but failed to remove its local record: ${e.message}")
+                                        }
+                                    }
+                                }
+
                                 val created = try {
                                     val auth = "Bearer " + String(mgmtSecretBytes, Charsets.UTF_8)
                                     val result = provider.createKey(
@@ -1007,14 +1096,24 @@ private fun ProvisionedKeysView(
                                 if (resp.isSuccessful) {
                                     createdSecret = created.key
                                     showCreateDialog = false
+                                    rotateSourceProviderKeyId = null
+                                    rotateSourceLocalId = null
                                     loadProvisioned()
                                 } else {
-                                    createError = "stored on provider but failed to save locally: HTTP ${resp.code()}"
+                                    createError = if (isRotate)
+                                        "CRITICAL: the old key was already deleted on the provider, but saving its replacement locally failed (HTTP ${resp.code()}) — retry manually."
+                                    else
+                                        "stored on provider but failed to save locally: HTTP ${resp.code()}"
                                 }
                             } catch (e: retrofit2.HttpException) {
-                                if (e.code() == 401) onLogout() else createError = "error ${e.code()}"
+                                if (e.code() == 401) onLogout()
+                                else createError = if (isRotate)
+                                    "CRITICAL: the old key was already deleted on the provider, but creating its replacement failed (error ${e.code()}) — you now have NO active key for this identity. Retry manually."
+                                else "error ${e.code()}"
                             } catch (e: Exception) {
-                                createError = e.message ?: "failed"
+                                createError = if (isRotate)
+                                    "CRITICAL: the old key was already deleted on the provider, but creating its replacement failed (${e.message}) — you now have NO active key for this identity. Retry manually."
+                                else e.message ?: "failed"
                             } finally {
                                 createBusy = false
                             }
@@ -1023,7 +1122,15 @@ private fun ProvisionedKeysView(
                 )
             },
             dismissButton = {
-                KvButtonOutline(text = "CANCEL", onClick = { showCreateDialog = false }, enabled = !createBusy)
+                KvButtonOutline(
+                    text = "CANCEL",
+                    onClick = {
+                        showCreateDialog = false
+                        rotateSourceProviderKeyId = null
+                        rotateSourceLocalId = null
+                    },
+                    enabled = !createBusy,
+                )
             },
             containerColor = Color(0xFF0C120C),
             titleContentColor = KvAccent,

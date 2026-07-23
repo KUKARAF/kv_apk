@@ -19,12 +19,16 @@ data class OpenRouterKeyData(
     val id: String? = null,
     val name: String,
     val disabled: Boolean = false,
+    val limit: Double? = null,
+    @SerializedName("limit_reset") val limitReset: String? = null,
 ) {
     // Same hash/id ambiguity kv_cli's providers/openrouter.rs flags — prefer hash, fall back to id.
     val keyId: String get() = hash ?: id ?: ""
 }
 
 data class OpenRouterListResponse(val data: List<OpenRouterKeyData>)
+
+data class OpenRouterGetResponse(val data: OpenRouterKeyData)
 
 data class OpenRouterCreateKeyRequest(val name: String, val limit: Double? = null)
 
@@ -40,6 +44,12 @@ data class OpenRouterUpdateKeyRequest(@SerializedName("limit_reset") val limitRe
 interface OpenRouterApi {
     @GET("api/v1/keys")
     suspend fun listKeys(@Header("Authorization") auth: String): OpenRouterListResponse
+
+    @GET("api/v1/keys/{id}")
+    suspend fun getKey(
+        @Header("Authorization") auth: String,
+        @Path("id") id: String,
+    ): OpenRouterGetResponse
 
     @POST("api/v1/keys")
     suspend fun createKey(
