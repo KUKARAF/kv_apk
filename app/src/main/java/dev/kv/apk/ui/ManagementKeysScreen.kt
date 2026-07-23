@@ -866,7 +866,7 @@ private fun ProvisionedKeysView(
                                                 } finally {
                                                     mgmtSecretBytes.zero()
                                                 }
-                                                api.revokeProvisionedKey(managementKey.id, pk.id)
+                                                api.deleteProvisionedKey(managementKey.id, pk.id)
                                                 onToast("revoked ${pk.label}")
                                                 loadProvisioned()
                                             } catch (e: retrofit2.HttpException) {

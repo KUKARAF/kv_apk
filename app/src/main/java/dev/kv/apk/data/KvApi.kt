@@ -338,8 +338,10 @@ interface KvApi {
         @Path("deviceId") deviceId: String,
     ): DeviceKvPayload
 
-    @POST("api/admin/management-keys/{id}/provisioned-keys/{pkId}/revoke")
-    suspend fun revokeProvisionedKey(
+    // Hard delete — called after the key has already been deleted on the provider, so the
+    // stored encrypted copy is no longer recoverable-but-useless.
+    @DELETE("api/admin/management-keys/{id}/provisioned-keys/{pkId}")
+    suspend fun deleteProvisionedKey(
         @Path("id") id: String,
         @Path("pkId") pkId: String,
     ): Response<Unit>
