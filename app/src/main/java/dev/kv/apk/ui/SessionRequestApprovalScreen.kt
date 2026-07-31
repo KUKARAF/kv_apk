@@ -76,6 +76,8 @@ fun SessionRequestApprovalScreen(
     var durationMenuExpanded by remember { mutableStateOf(false) }
     var actionLoading by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
+    var confirmCode by remember { mutableStateOf("") }
+    var confirmError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(requestId) {
         try {
@@ -194,6 +196,35 @@ fun SessionRequestApprovalScreen(
                     KvCard(modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(15.dp)) {
                             KvSectionTitle("APPROVE SESSION")
+
+                            KvLabel("CONFIRM CODE (ask the requester)")
+                            KvInput(
+                                value = confirmCode,
+                                onValueChange = { confirmCode = it; confirmError = null },
+                                placeholder = "paste the 3-emoji code",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 4.dp),
+                            )
+                            Text(
+                                "The requester's client printed/displayed this code — do not approve without it.",
+                                fontFamily = VT323,
+                                fontSize = 13.sp,
+                                color = KvDim,
+                                modifier = Modifier.padding(bottom = 4.dp),
+                            )
+                            if (confirmError != null) {
+                                Text(
+                                    confirmError!!,
+                                    fontFamily = VT323,
+                                    fontSize = 14.sp,
+                                    color = KvDanger,
+                                    modifier = Modifier.padding(bottom = 4.dp),
+                                )
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+
                             KvLabel("SESSION DURATION")
                             Box {
                                 Box(
@@ -249,20 +280,24 @@ fun SessionRequestApprovalScreen(
                                 )
                                 KvButton(
                                     text = "APPROVE",
-                                    enabled = !actionLoading,
+                                    enabled = !actionLoading && confirmCode.isNotBlank(),
                                     modifier = Modifier.weight(1f),
                                     onClick = {
                                         scope.launch {
                                             actionLoading = true
+                                            confirmError = null
                                             try {
                                                 val resp = api.approveSessionRequest(
                                                     requestId,
-                                                    ApproveSessionRequestBody(selectedDuration.hours),
+                                                    ApproveSessionRequestBody(selectedDuration.hours, confirmCode.trim()),
                                                 )
-                                                result = if (resp.isSuccessful)
-                                                    "Approved! Token valid for ${selectedDuration.label}."
-                                                else
-                                                    "Error: HTTP ${resp.code()}"
+                                                if (resp.isSuccessful) {
+                                                    result = "Approved! Token valid for ${selectedDuration.label}."
+                                                } else if (resp.code() == 403) {
+                                                    confirmError = "Code doesn't match — confirm it with the requester and try again."
+                                                } else {
+                                                    result = "Error: HTTP ${resp.code()}"
+                                                }
                                             } catch (e: Exception) {
                                                 error = e.message
                                             } finally {

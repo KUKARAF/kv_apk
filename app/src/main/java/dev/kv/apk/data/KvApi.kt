@@ -349,6 +349,7 @@ interface KvApi {
 
 data class ApproveSessionRequestBody(
     @SerializedName("approved_duration_hours") val approvedDurationHours: Long,
+    @SerializedName("confirm_code") val confirmCode: String,
 )
 
 data class SessionRequestDetails(
