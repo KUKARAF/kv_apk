@@ -76,7 +76,7 @@ fun SessionRequestApprovalScreen(
     var durationMenuExpanded by remember { mutableStateOf(false) }
     var actionLoading by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
-    var confirmCode by remember { mutableStateOf("") }
+    var approvalCode by remember { mutableStateOf("") }
     var confirmError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(requestId) {
@@ -197,17 +197,17 @@ fun SessionRequestApprovalScreen(
                         Column(Modifier.padding(15.dp)) {
                             KvSectionTitle("APPROVE SESSION")
 
-                            KvLabel("CONFIRM CODE (ask the requester)")
+                            KvLabel("APPROVAL CODE (ask the requester)")
                             KvInput(
-                                value = confirmCode,
-                                onValueChange = { confirmCode = it; confirmError = null },
-                                placeholder = "paste the 3-emoji code",
+                                value = approvalCode,
+                                onValueChange = { approvalCode = it; confirmError = null },
+                                placeholder = "paste the approval code",
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(bottom = 4.dp),
                             )
                             Text(
-                                "The requester's client printed/displayed this code — do not approve without it.",
+                                "The requester's device displayed this code — do not approve without it.",
                                 fontFamily = VT323,
                                 fontSize = 13.sp,
                                 color = KvDim,
@@ -280,7 +280,7 @@ fun SessionRequestApprovalScreen(
                                 )
                                 KvButton(
                                     text = "APPROVE",
-                                    enabled = !actionLoading && confirmCode.isNotBlank(),
+                                    enabled = !actionLoading && approvalCode.isNotBlank(),
                                     modifier = Modifier.weight(1f),
                                     onClick = {
                                         scope.launch {
@@ -289,7 +289,7 @@ fun SessionRequestApprovalScreen(
                                             try {
                                                 val resp = api.approveSessionRequest(
                                                     requestId,
-                                                    ApproveSessionRequestBody(selectedDuration.hours, confirmCode.trim()),
+                                                    ApproveSessionRequestBody(selectedDuration.hours, approvalCode.trim()),
                                                 )
                                                 if (resp.isSuccessful) {
                                                     result = "Approved! Token valid for ${selectedDuration.label}."

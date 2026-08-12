@@ -369,7 +369,7 @@ interface KvApi {
 
 data class ApproveSessionRequestBody(
     @SerializedName("approved_duration_hours") val approvedDurationHours: Long,
-    @SerializedName("confirm_code") val confirmCode: String,
+    @SerializedName("approval_token") val approvalToken: String,
 )
 
 data class SessionRequestDetails(
@@ -395,8 +395,6 @@ data class CreateSessionRequestResponse(
     @SerializedName("expires_at") val expiresAt: String,
     // Secret held only by this requester; required to poll for the session token.
     @SerializedName("poll_secret") val pollSecret: String,
-    // Confirm code the requester shows the approver (approver must type it back to approve).
-    @SerializedName("confirm_code") val confirmCode: String? = null,
 )
 
 data class SessionRequestStatus(
@@ -405,6 +403,10 @@ data class SessionRequestStatus(
     // device's public key (same envelope scheme as device-encrypted KV -> DeviceKvPayload).
     // Subsequent polls after first delivery return status "delivered" with a null envelope.
     val envelope: DeviceKvPayload? = null,
+    // Present while status != "approved" (idempotent, re-fetchable each poll): a device-KV
+    // envelope wrapping the one-time approval token the requester shows the approver. Same
+    // envelope scheme as [envelope]; decrypt with the device private key (AAD = request id).
+    @SerializedName("approval_envelope") val approvalEnvelope: DeviceKvPayload? = null,
 )
 
 interface KvUnauthApi {
