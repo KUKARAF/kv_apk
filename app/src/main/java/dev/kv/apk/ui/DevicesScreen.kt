@@ -26,7 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.DeviceItem
-import dev.kv.apk.data.DeviceRegistrationRequest
+import dev.kv.apk.data.PasskeyEnrolmentRequiredException
+import dev.kv.apk.data.registerDeviceViaPasskey
 import dev.kv.apk.data.KvApi
 import dev.kv.apk.data.Prefs
 import dev.kv.apk.ui.theme.KvAccent
@@ -186,21 +187,17 @@ fun DevicesScreen(
                         registerError = ""
                         try {
                             if (prefs.devicePrivKeyPkcs8.isBlank()) generateAndStoreKeyPair(prefs)
-                            val resp = api.registerDevice(
-                                DeviceRegistrationRequest(
-                                    name = registerName.trim(),
-                                    publicKey = prefs.devicePubKeySpki,
-                                    keyType = "p256",
-                                )
+                            val newId = registerDeviceViaPasskey(
+                                api,
+                                name = registerName.trim(),
+                                pubKeySpki = prefs.devicePubKeySpki,
                             )
-                            if (resp.isSuccessful) {
-                                prefs.deviceId = resp.body()!!.id
-                                toast = "device registered"
-                                showRegisterDialog = false
-                                load()
-                            } else {
-                                registerError = "registration failed: HTTP ${resp.code()}"
-                            }
+                            prefs.deviceId = newId
+                            toast = "device registered"
+                            showRegisterDialog = false
+                            load()
+                        } catch (e: PasskeyEnrolmentRequiredException) {
+                            registerError = e.message ?: "passkey enrolment required"
                         } catch (e: Exception) {
                             registerError = e.message ?: "registration failed"
                         } finally {

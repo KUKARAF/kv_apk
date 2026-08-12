@@ -42,10 +42,12 @@ import androidx.compose.ui.unit.sp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import dev.kv.apk.data.CreateSessionRequestBody
-import dev.kv.apk.data.DeviceRegistrationRequest
+import dev.kv.apk.data.DeviceCrypto
+import dev.kv.apk.data.PasskeyEnrolmentRequiredException
 import dev.kv.apk.data.Prefs
 import dev.kv.apk.data.buildApi
 import dev.kv.apk.data.buildUnauthApi
+import dev.kv.apk.data.registerDeviceViaPasskey
 import dev.kv.apk.ui.theme.KvAccent
 import dev.kv.apk.ui.theme.KvBg
 import dev.kv.apk.ui.theme.KvDanger
@@ -111,6 +113,7 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
     var selectedDuration by remember { mutableStateOf(DURATION_OPTIONS[1]) } // 30 days default
     var durationMenuExpanded by remember { mutableStateOf(false) }
     var approvalUrl by remember { mutableStateOf("") }
+    var confirmCode by remember { mutableStateOf("") }
     var requestId by remember { mutableStateOf("") }
     var pollSecret by remember { mutableStateOf("") }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -132,8 +135,18 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                 val status = unauthApi.pollStatus(requestId, pollSecret)
                 when (status.status) {
                     "approved" -> {
-                        val token = status.sessionToken ?: run {
-                            error = "Server approved but returned no token"
+                        // The token is delivered ECDH-wrapped to this device's public key.
+                        // Unwrap it locally with the device private key (same envelope scheme
+                        // as device-encrypted KV) — the poll response no longer carries plaintext.
+                        val envelope = status.envelope ?: run {
+                            error = "Server approved but returned no envelope"
+                            phase = SetupPhase.FORM
+                            return@LaunchedEffect
+                        }
+                        val token = try {
+                            DeviceCrypto.decryptEnvelope(prefs.devicePrivKeyPkcs8, envelope)
+                        } catch (e: Exception) {
+                            error = "Failed to decrypt session token: ${e.message}"
                             phase = SetupPhase.FORM
                             return@LaunchedEffect
                         }
@@ -180,20 +193,16 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
             return@LaunchedEffect
         }
         try {
-            val resp = buildApi(prefs.token).registerDevice(
-                DeviceRegistrationRequest(
-                    name = deviceName.trim(),
-                    publicKey = prefs.devicePubKeySpki,
-                    keyType = "p256",
-                )
+            val newId = registerDeviceViaPasskey(
+                buildApi(prefs.token),
+                name = deviceName.trim(),
+                pubKeySpki = prefs.devicePubKeySpki,
             )
-            if (resp.isSuccessful) {
-                prefs.deviceId = resp.body()!!.id
-                onSetupComplete()
-            } else {
-                error = "Device registration failed: HTTP ${resp.code()}"
-                phase = SetupPhase.FORM
-            }
+            prefs.deviceId = newId
+            onSetupComplete()
+        } catch (e: PasskeyEnrolmentRequiredException) {
+            error = e.message
+            phase = SetupPhase.FORM
         } catch (e: Exception) {
             error = "Device registration failed: ${e.message}"
             phase = SetupPhase.FORM
@@ -344,14 +353,29 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                                             loading = true
                                             error = null
                                             try {
+                                                // The token is now wrapped to a registered device's
+                                                // key, so a session request requires an existing
+                                                // device_id. First-time enrolment (registering that
+                                                // device) is passkey-gated — see follow-up.
+                                                if (prefs.deviceId.isBlank()) {
+                                                    error = "This device isn't registered yet. " +
+                                                        "Device enrolment now requires a passkey " +
+                                                        "(WebAuthn) and isn't available in this " +
+                                                        "build — register this device from the web " +
+                                                        "admin panel first."
+                                                    loading = false
+                                                    return@launch
+                                                }
                                                 val label = if (deviceName.isNotBlank()) deviceName.trim() else null
                                                 val result = buildUnauthApi().createSessionRequest(
                                                     CreateSessionRequestBody(
                                                         label = label,
                                                         requestedDurationHours = selectedDuration.hours,
+                                                        deviceId = prefs.deviceId,
                                                     )
                                                 )
                                                 approvalUrl = result.url
+                                                confirmCode = result.confirmCode ?: ""
                                                 // Set the secret before requestId so the polling
                                                 // LaunchedEffect(requestId) has it on first tick.
                                                 pollSecret = result.pollSecret
@@ -441,6 +465,24 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                                     .padding(vertical = 8.dp),
                             )
 
+                            if (confirmCode.isNotBlank()) {
+                                Spacer(Modifier.height(14.dp))
+                                KvLabel("CONFIRM CODE (read to approver)")
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(0xFF070D07), RoundedCornerShape(2.dp))
+                                        .padding(10.dp),
+                                ) {
+                                    Text(
+                                        confirmCode,
+                                        fontFamily = VT323,
+                                        fontSize = 20.sp,
+                                        color = KvAccent,
+                                    )
+                                }
+                            }
+
                             Spacer(Modifier.height(10.dp))
 
                             Row(
@@ -467,6 +509,7 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                                 onClick = {
                                     requestId = ""
                                     approvalUrl = ""
+                                    confirmCode = ""
                                     qrBitmap = null
                                     error = null
                                     phase = SetupPhase.FORM
@@ -510,19 +553,15 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                         keyChoiceBusy = true
                         error = null
                         try {
-                            val resp = buildApi(prefs.token).registerDevice(
-                                DeviceRegistrationRequest(
-                                    name = keyChoiceName.trim(),
-                                    publicKey = prefs.devicePubKeySpki,
-                                    keyType = "p256",
-                                )
+                            val newId = registerDeviceViaPasskey(
+                                buildApi(prefs.token),
+                                name = keyChoiceName.trim(),
+                                pubKeySpki = prefs.devicePubKeySpki,
                             )
-                            if (resp.isSuccessful) {
-                                prefs.deviceId = resp.body()!!.id
-                                onSetupComplete()
-                            } else {
-                                error = "Registration failed: HTTP ${resp.code()}"
-                            }
+                            prefs.deviceId = newId
+                            onSetupComplete()
+                        } catch (e: PasskeyEnrolmentRequiredException) {
+                            error = e.message
                         } catch (e: Exception) {
                             error = "Registration failed: ${e.message}"
                         } finally {

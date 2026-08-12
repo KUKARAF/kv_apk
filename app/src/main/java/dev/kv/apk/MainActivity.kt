@@ -28,7 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.ApprovalItem
-import dev.kv.apk.data.DeviceRegistrationRequest
+import dev.kv.apk.data.PasskeyEnrolmentRequiredException
+import dev.kv.apk.data.registerDeviceViaPasskey
 import dev.kv.apk.data.Prefs
 import dev.kv.apk.data.buildApi
 import dev.kv.apk.ui.ApprovalsScreen
@@ -302,20 +303,16 @@ private fun MainContent(
                     deviceRegisterError = ""
                     try {
                         if (prefs.devicePrivKeyPkcs8.isBlank()) generateAndStoreKeyPair(prefs)
-                        val resp = api.registerDevice(
-                            DeviceRegistrationRequest(
-                                name = deviceRegisterName.trim(),
-                                publicKey = prefs.devicePubKeySpki,
-                                keyType = "p256",
-                            )
+                        val newId = registerDeviceViaPasskey(
+                            api,
+                            name = deviceRegisterName.trim(),
+                            pubKeySpki = prefs.devicePubKeySpki,
                         )
-                        if (resp.isSuccessful) {
-                            prefs.deviceId = resp.body()!!.id
-                            deviceMissing = false
-                            showDeviceDialog = false
-                        } else {
-                            deviceRegisterError = "registration failed: HTTP ${resp.code()}"
-                        }
+                        prefs.deviceId = newId
+                        deviceMissing = false
+                        showDeviceDialog = false
+                    } catch (e: PasskeyEnrolmentRequiredException) {
+                        deviceRegisterError = e.message ?: "passkey enrolment required"
                     } catch (e: Exception) {
                         deviceRegisterError = e.message ?: "registration failed"
                     } finally {

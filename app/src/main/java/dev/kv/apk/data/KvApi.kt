@@ -1,5 +1,6 @@
 package dev.kv.apk.data
 
+import com.google.gson.JsonObject
 import com.google.gson.annotations.SerializedName
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -158,13 +159,29 @@ data class CreateShareRequest(
 
 data class CreateShareResponse(val id: String)
 
-data class DeviceRegistrationRequest(
+// WebAuthn-gated two-step device registration (replaces the old single-shot POST api/devices).
+// Step 1 issues a WebAuthn assertion challenge bound to the account's existing passkey; step 2
+// submits the signed assertion and, on success, persists the new device.
+data class DeviceRegisterBeginRequest(
     val name: String,
     @SerializedName("public_key") val publicKey: String,
-    @SerializedName("key_type") val keyType: String? = null,
+    @SerializedName("key_type") val keyType: String,
 )
 
-data class DeviceRegistrationResponse(val id: String)
+data class DeviceRegisterBeginResponse(
+    @SerializedName("challenge_id") val challengeId: String,
+    // Opaque PublicKeyCredentialRequestOptions (WebAuthn auth challenge) to feed the platform
+    // Credential Manager / FIDO2 API. Kept as raw JSON — the app does not model its internals.
+    val options: JsonObject,
+)
+
+data class DeviceRegisterFinishRequest(
+    @SerializedName("challenge_id") val challengeId: String,
+    // Raw WebAuthn assertion (PublicKeyCredential) produced by the platform authenticator.
+    val assertion: JsonObject,
+)
+
+data class DeviceRegisterFinishResponse(val id: String)
 
 data class ManagementKeyRow(
     val id: String,
@@ -289,8 +306,11 @@ interface KvApi {
     @POST("api/admin/session-requests/{id}/reject")
     suspend fun rejectSessionRequest(@Path("id") id: String): Response<Unit>
 
-    @POST("api/devices")
-    suspend fun registerDevice(@Body body: DeviceRegistrationRequest): Response<DeviceRegistrationResponse>
+    @POST("api/devices/register/begin")
+    suspend fun deviceRegisterBegin(@Body body: DeviceRegisterBeginRequest): DeviceRegisterBeginResponse
+
+    @POST("api/devices/register/finish")
+    suspend fun deviceRegisterFinish(@Body body: DeviceRegisterFinishRequest): DeviceRegisterFinishResponse
 
     @GET("api/admin/devices/{deviceId}/kv/{kvKey}")
     suspend fun getDeviceKv(
@@ -364,6 +384,9 @@ data class SessionRequestDetails(
 data class CreateSessionRequestBody(
     val label: String? = null,
     @SerializedName("requested_duration_hours") val requestedDurationHours: Long? = null,
+    // Required: uuid of a device already registered on the account. The approved session token
+    // is delivered ECDH-wrapped to this device's public key; the server 404s if it's unknown.
+    @SerializedName("device_id") val deviceId: String,
 )
 
 data class CreateSessionRequestResponse(
@@ -372,11 +395,16 @@ data class CreateSessionRequestResponse(
     @SerializedName("expires_at") val expiresAt: String,
     // Secret held only by this requester; required to poll for the session token.
     @SerializedName("poll_secret") val pollSecret: String,
+    // Confirm code the requester shows the approver (approver must type it back to approve).
+    @SerializedName("confirm_code") val confirmCode: String? = null,
 )
 
 data class SessionRequestStatus(
     val status: String,
-    @SerializedName("session_token") val sessionToken: String? = null,
+    // Present only when status == "approved": the session token ECDH-wrapped to the requesting
+    // device's public key (same envelope scheme as device-encrypted KV -> DeviceKvPayload).
+    // Subsequent polls after first delivery return status "delivered" with a null envelope.
+    val envelope: DeviceKvPayload? = null,
 )
 
 interface KvUnauthApi {
