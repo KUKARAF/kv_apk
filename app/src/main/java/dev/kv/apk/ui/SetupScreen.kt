@@ -194,6 +194,7 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
         }
         try {
             val newId = registerDeviceViaPasskey(
+                context,
                 buildApi(prefs.token),
                 name = deviceName.trim(),
                 pubKeySpki = prefs.devicePubKeySpki,
@@ -554,6 +555,7 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                         error = null
                         try {
                             val newId = registerDeviceViaPasskey(
+                                context,
                                 buildApi(prefs.token),
                                 name = keyChoiceName.trim(),
                                 pubKeySpki = prefs.devicePubKeySpki,

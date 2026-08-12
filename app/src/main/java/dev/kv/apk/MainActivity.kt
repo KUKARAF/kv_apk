@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.ApprovalItem
@@ -116,6 +117,7 @@ private fun MainContent(
 ) {
     val api = remember { buildApi(prefs.token) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var screen by remember { mutableStateOf(if (initialDeepLinkId != null) "approve:$initialDeepLinkId" else "home") }
 
     var approvals by remember { mutableStateOf<List<ApprovalItem>>(emptyList()) }
@@ -304,6 +306,7 @@ private fun MainContent(
                     try {
                         if (prefs.devicePrivKeyPkcs8.isBlank()) generateAndStoreKeyPair(prefs)
                         val newId = registerDeviceViaPasskey(
+                            context,
                             api,
                             name = deviceRegisterName.trim(),
                             pubKeySpki = prefs.devicePubKeySpki,
