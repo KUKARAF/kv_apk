@@ -76,8 +76,7 @@ fun SessionRequestApprovalScreen(
     var durationMenuExpanded by remember { mutableStateOf(false) }
     var actionLoading by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
-    var approvalCode by remember { mutableStateOf("") }
-    var confirmError by remember { mutableStateOf<String?>(null) }
+    var actionError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(requestId) {
         try {
@@ -160,14 +159,34 @@ fun SessionRequestApprovalScreen(
                         Column(Modifier.padding(15.dp)) {
                             KvSectionTitle("REQUEST DETAILS")
 
-                            KvLabel("FROM")
+                            KvLabel("DEVICE")
                             Text(
-                                d.label ?: "(no label)",
+                                d.deviceName ?: "Unknown device",
                                 fontFamily = VT323,
                                 fontSize = 20.sp,
                                 color = KvAccent,
-                                modifier = Modifier.padding(bottom = 14.dp),
+                                modifier = Modifier.padding(bottom = if (d.label != null) 2.dp else 14.dp),
                             )
+                            if (d.label != null) {
+                                Text(
+                                    "claims to be: ${d.label}",
+                                    fontFamily = VT323,
+                                    fontSize = 13.sp,
+                                    color = KvDim,
+                                    modifier = Modifier.padding(bottom = 14.dp),
+                                )
+                            }
+
+                            if (!d.isOwnDevice) {
+                                Text(
+                                    "⚠️ This device is not registered to your account — " +
+                                        "you cannot approve or reject this request.",
+                                    fontFamily = VT323,
+                                    fontSize = 14.sp,
+                                    color = KvDanger,
+                                    modifier = Modifier.padding(bottom = 14.dp),
+                                )
+                            }
 
                             KvLabel("REQUESTED AT")
                             Text(
@@ -197,33 +216,15 @@ fun SessionRequestApprovalScreen(
                         Column(Modifier.padding(15.dp)) {
                             KvSectionTitle("APPROVE SESSION")
 
-                            KvLabel("APPROVAL CODE (ask the requester)")
-                            KvInput(
-                                value = approvalCode,
-                                onValueChange = { approvalCode = it; confirmError = null },
-                                placeholder = "paste the approval code",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 4.dp),
-                            )
-                            Text(
-                                "The requester's device displayed this code — do not approve without it.",
-                                fontFamily = VT323,
-                                fontSize = 13.sp,
-                                color = KvDim,
-                                modifier = Modifier.padding(bottom = 4.dp),
-                            )
-                            if (confirmError != null) {
+                            if (actionError != null) {
                                 Text(
-                                    confirmError!!,
+                                    actionError!!,
                                     fontFamily = VT323,
                                     fontSize = 14.sp,
                                     color = KvDanger,
-                                    modifier = Modifier.padding(bottom = 4.dp),
+                                    modifier = Modifier.padding(bottom = 8.dp),
                                 )
                             }
-
-                            Spacer(Modifier.height(12.dp))
 
                             KvLabel("SESSION DURATION")
                             Box {
@@ -262,14 +263,21 @@ fun SessionRequestApprovalScreen(
                             ) {
                                 KvButtonDanger(
                                     text = "REJECT",
-                                    enabled = !actionLoading,
+                                    enabled = !actionLoading && d.isOwnDevice,
                                     modifier = Modifier.weight(1f),
                                     onClick = {
                                         scope.launch {
                                             actionLoading = true
+                                            actionError = null
                                             try {
                                                 val resp = api.rejectSessionRequest(requestId)
-                                                result = if (resp.isSuccessful) "Request rejected." else "Error: HTTP ${resp.code()}"
+                                                if (resp.isSuccessful) {
+                                                    result = "Request rejected."
+                                                } else if (resp.code() == 403) {
+                                                    actionError = "You don't have permission to reject this device's request."
+                                                } else {
+                                                    result = "Error: HTTP ${resp.code()}"
+                                                }
                                             } catch (e: Exception) {
                                                 error = e.message
                                             } finally {
@@ -280,21 +288,21 @@ fun SessionRequestApprovalScreen(
                                 )
                                 KvButton(
                                     text = "APPROVE",
-                                    enabled = !actionLoading && approvalCode.isNotBlank(),
+                                    enabled = !actionLoading && d.isOwnDevice,
                                     modifier = Modifier.weight(1f),
                                     onClick = {
                                         scope.launch {
                                             actionLoading = true
-                                            confirmError = null
+                                            actionError = null
                                             try {
                                                 val resp = api.approveSessionRequest(
                                                     requestId,
-                                                    ApproveSessionRequestBody(selectedDuration.hours, approvalCode.trim()),
+                                                    ApproveSessionRequestBody(selectedDuration.hours),
                                                 )
                                                 if (resp.isSuccessful) {
                                                     result = "Approved! Token valid for ${selectedDuration.label}."
                                                 } else if (resp.code() == 403) {
-                                                    confirmError = "Code doesn't match — confirm it with the requester and try again."
+                                                    actionError = "You don't have permission to approve this device's request."
                                                 } else {
                                                     result = "Error: HTTP ${resp.code()}"
                                                 }

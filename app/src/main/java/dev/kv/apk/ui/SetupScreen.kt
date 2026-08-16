@@ -113,8 +113,6 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
     var selectedDuration by remember { mutableStateOf(DURATION_OPTIONS[1]) } // 30 days default
     var durationMenuExpanded by remember { mutableStateOf(false) }
     var approvalUrl by remember { mutableStateOf("") }
-    // The one-time approval token, decrypted from each poll's approval_envelope while pending.
-    var approvalToken by remember { mutableStateOf("") }
     var requestId by remember { mutableStateOf("") }
     var pollSecret by remember { mutableStateOf("") }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -166,14 +164,7 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                         return@LaunchedEffect
                     }
                     else -> {
-                        // Still pending. The approval token is delivered ECDH-wrapped to this
-                        // device (idempotent, re-fetchable each poll); decrypt and display it so
-                        // the requester can read it to the approver.
-                        status.approvalEnvelope?.let { env ->
-                            runCatching {
-                                DeviceCrypto.decryptEnvelope(prefs.devicePrivKeyPkcs8, env)
-                            }.onSuccess { approvalToken = it }
-                        }
+                        // Still pending — keep polling.
                     }
                 }
             } catch (_: Exception) { /* network hiccup, keep polling */ }
@@ -387,7 +378,6 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                                                     )
                                                 )
                                                 approvalUrl = result.url
-                                                approvalToken = ""
                                                 // Set the secret before requestId so the polling
                                                 // LaunchedEffect(requestId) has it on first tick.
                                                 pollSecret = result.pollSecret
@@ -477,24 +467,6 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                                     .padding(vertical = 8.dp),
                             )
 
-                            if (approvalToken.isNotBlank()) {
-                                Spacer(Modifier.height(14.dp))
-                                KvLabel("APPROVAL CODE (give this to your approver)")
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(Color(0xFF070D07), RoundedCornerShape(2.dp))
-                                        .padding(10.dp),
-                                ) {
-                                    Text(
-                                        approvalToken,
-                                        fontFamily = VT323,
-                                        fontSize = 20.sp,
-                                        color = KvAccent,
-                                    )
-                                }
-                            }
-
                             Spacer(Modifier.height(10.dp))
 
                             Row(
@@ -521,7 +493,6 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                                 onClick = {
                                     requestId = ""
                                     approvalUrl = ""
-                                    approvalToken = ""
                                     qrBitmap = null
                                     error = null
                                     phase = SetupPhase.FORM

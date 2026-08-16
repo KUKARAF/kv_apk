@@ -369,16 +369,21 @@ interface KvApi {
 
 data class ApproveSessionRequestBody(
     @SerializedName("approved_duration_hours") val approvedDurationHours: Long,
-    @SerializedName("approval_token") val approvalToken: String,
 )
 
 data class SessionRequestDetails(
     val id: String,
+    // Self-reported by whoever created the request — cosmetic only, never a trust signal.
     val label: String? = null,
     val status: String,
     @SerializedName("requested_at") val requestedAt: String,
     @SerializedName("expires_at") val expiresAt: String,
     @SerializedName("requested_duration_hours") val requestedDurationHours: Long? = null,
+    // The requested device's real, immutable, owner-scoped name — this is the trust signal.
+    @SerializedName("device_name") val deviceName: String? = null,
+    // Whether the logged-in admin owns this request's device; approve/reject are only
+    // meaningful (server-enforced) when true.
+    @SerializedName("is_own_device") val isOwnDevice: Boolean = false,
 )
 
 data class CreateSessionRequestBody(
@@ -403,10 +408,6 @@ data class SessionRequestStatus(
     // device's public key (same envelope scheme as device-encrypted KV -> DeviceKvPayload).
     // Subsequent polls after first delivery return status "delivered" with a null envelope.
     val envelope: DeviceKvPayload? = null,
-    // Present while status != "approved" (idempotent, re-fetchable each poll): a device-KV
-    // envelope wrapping the one-time approval token the requester shows the approver. Same
-    // envelope scheme as [envelope]; decrypt with the device private key (AAD = request id).
-    @SerializedName("approval_envelope") val approvalEnvelope: DeviceKvPayload? = null,
 )
 
 interface KvUnauthApi {
