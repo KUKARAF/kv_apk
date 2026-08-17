@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.ApproveSessionRequestBody
+import dev.kv.apk.data.BASE_URL
 import dev.kv.apk.data.KvApi
 import dev.kv.apk.data.SessionRequestDetails
 import dev.kv.apk.ui.theme.KvAccent
@@ -187,6 +188,15 @@ fun SessionRequestApprovalScreen(
                                     modifier = Modifier.padding(bottom = 14.dp),
                                 )
                             }
+
+                            KvLabel("REQUEST LINK (compare against what your device is showing)")
+                            Text(
+                                "${BASE_URL}admin/session-request.html?id=$requestId",
+                                fontFamily = VT323,
+                                fontSize = 13.sp,
+                                color = Color(0xFF93c5fd),
+                                modifier = Modifier.padding(bottom = 14.dp),
+                            )
 
                             KvLabel("REQUESTED AT")
                             Text(
