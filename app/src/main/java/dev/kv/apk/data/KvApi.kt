@@ -125,6 +125,11 @@ data class RateLimitsResponse(
     @SerializedName("access_log") val accessLog: List<AccessLogEntry>,
 )
 
+data class SessionWhoami(
+    @SerializedName("device_id") val deviceId: String? = null,
+    @SerializedName("device_name") val deviceName: String? = null,
+)
+
 data class SessionInfo(
     val email: String,
     val subject: String,
@@ -288,6 +293,9 @@ interface KvApi {
     @GET("api/admin/session")
     suspend fun getSession(): SessionInfo
 
+    @GET("api/admin/session/whoami")
+    suspend fun whoami(): SessionWhoami
+
     @POST("api/admin/session-key")
     suspend fun createSessionKey(): Response<CreateKeyResponse>
 
@@ -389,9 +397,24 @@ data class SessionRequestDetails(
 data class CreateSessionRequestBody(
     val label: String? = null,
     @SerializedName("requested_duration_hours") val requestedDurationHours: Long? = null,
-    // Required: uuid of a device already registered on the account. The approved session token
-    // is delivered ECDH-wrapped to this device's public key; the server 404s if it's unknown.
+    // Proof-of-possession: id of a challenge previously issued for this device via
+    // POST api/session-request/challenge, plus the plaintext nonce decrypted from that
+    // challenge's envelope. The server 404s on a missing/expired/already-used challenge or a
+    // wrong nonce (deliberately indistinguishable from each other).
+    @SerializedName("challenge_id") val challengeId: String,
+    val nonce: String,
+)
+
+data class CreateChallengeBody(
     @SerializedName("device_id") val deviceId: String,
+)
+
+data class CreateChallengeResponse(
+    @SerializedName("challenge_id") val challengeId: String,
+    // Same envelope shape as the final session-token delivery — ECDH-wraps a random nonce to
+    // this device's public key. Expires in 2 minutes; decrypt and resubmit promptly.
+    val envelope: DeviceKvPayload,
+    @SerializedName("expires_at") val expiresAt: String,
 )
 
 data class CreateSessionRequestResponse(
@@ -411,6 +434,9 @@ data class SessionRequestStatus(
 )
 
 interface KvUnauthApi {
+    @POST("api/session-request/challenge")
+    suspend fun createChallenge(@Body body: CreateChallengeBody): CreateChallengeResponse
+
     @POST("api/session-request")
     suspend fun createSessionRequest(@Body body: CreateSessionRequestBody): CreateSessionRequestResponse
 

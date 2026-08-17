@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import dev.kv.apk.data.CreateChallengeBody
 import dev.kv.apk.data.CreateSessionRequestBody
 import dev.kv.apk.data.DeviceCrypto
 import dev.kv.apk.data.PasskeyEnrolmentRequiredException
@@ -370,11 +371,22 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                                                     return@launch
                                                 }
                                                 val label = if (deviceName.isNotBlank()) deviceName.trim() else null
-                                                val result = buildUnauthApi().createSessionRequest(
+                                                val unauthApi = buildUnauthApi()
+                                                // Prove possession of this device's private key before
+                                                // the server will create a pending request for it.
+                                                val challenge = unauthApi.createChallenge(
+                                                    CreateChallengeBody(deviceId = prefs.deviceId)
+                                                )
+                                                val nonce = DeviceCrypto.decryptEnvelope(
+                                                    prefs.devicePrivKeyPkcs8,
+                                                    challenge.envelope,
+                                                )
+                                                val result = unauthApi.createSessionRequest(
                                                     CreateSessionRequestBody(
                                                         label = label,
                                                         requestedDurationHours = selectedDuration.hours,
-                                                        deviceId = prefs.deviceId,
+                                                        challengeId = challenge.challengeId,
+                                                        nonce = nonce,
                                                     )
                                                 )
                                                 approvalUrl = result.url

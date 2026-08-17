@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.KvApi
 import dev.kv.apk.data.SessionInfo
+import dev.kv.apk.data.SessionWhoami
 import dev.kv.apk.ui.theme.KvAccent
 import dev.kv.apk.ui.theme.KvBg
 import dev.kv.apk.ui.theme.KvDim
@@ -47,12 +48,16 @@ fun SessionScreen(
 ) {
     val scope = rememberCoroutineScope()
     var session by remember { mutableStateOf<SessionInfo?>(null) }
+    var whoami by remember { mutableStateOf<SessionWhoami?>(null) }
     var deviceToken by remember { mutableStateOf<String?>(null) }
     var toast by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         try {
             session = api.getSession()
+        } catch (_: Exception) {}
+        try {
+            whoami = api.whoami()
         } catch (_: Exception) {}
     }
 
@@ -104,6 +109,11 @@ fun SessionScreen(
                             SessionField("EXPIRES", session?.expiresAt ?: "—", modifier = Modifier.weight(1f))
                             Spacer(Modifier.width(20.dp))
                             SessionField("CREATED", session?.createdAt ?: "—", modifier = Modifier.weight(1f))
+                        }
+                        // Only present when this session was issued to a registered device
+                        // (device-bound token), rather than the general admin login session.
+                        if (whoami?.deviceName != null) {
+                            SessionField("DEVICE", whoami?.deviceName ?: "—")
                         }
                     }
                 }
