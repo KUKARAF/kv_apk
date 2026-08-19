@@ -394,8 +394,12 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                                                 // LaunchedEffect(requestId) has it on first tick.
                                                 pollSecret = result.pollSecret
                                                 requestId = result.id
-                                                // QR encodes the deep link so the KV app opens directly on scan
-                                                val deepLink = "kvapp://session-request?id=${result.id}"
+                                                // QR encodes the deep link so the KV app opens directly on scan.
+                                                // Must include the approve token — this QR is the only
+                                                // channel that carries it to the approving admin; a bare
+                                                // id (e.g. from a push notification) must never be enough.
+                                                val deepLink = "kvapp://session-request?id=${result.id}" +
+                                                    "&token=${Uri.encode(result.approveToken)}"
                                                 qrBitmap = runCatching { urlToQrBitmap(deepLink) }.getOrNull()
                                                 phase = SetupPhase.WAITING
                                             } catch (e: Exception) {

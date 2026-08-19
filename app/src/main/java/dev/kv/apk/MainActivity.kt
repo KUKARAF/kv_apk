@@ -72,9 +72,13 @@ private fun generateAndStoreKeyPair(prefs: Prefs): String {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val deepLinkId = intent.data
+        val deepLinkUri = intent.data
             ?.takeIf { it.scheme == "kvapp" && it.host == "session-request" }
-            ?.getQueryParameter("id")
+        val deepLinkId = deepLinkUri?.getQueryParameter("id")
+        // The approve token — only ever present when the link/QR came from the requesting
+        // device itself (never from a bare push notification). Its absence must mean the
+        // approval screen can't approve, not that the token is optional.
+        val deepLinkToken = deepLinkUri?.getQueryParameter("token")
 
         setContent {
             KvTheme {
@@ -93,6 +97,7 @@ class MainActivity : ComponentActivity() {
                     AppScreen.MAIN -> MainContent(
                         prefs = prefs,
                         initialDeepLinkId = deepLinkId,
+                        initialDeepLinkToken = deepLinkToken,
                         onLogout = {
                             prefs.clearToken()
                             appScreen = AppScreen.SETUP
@@ -112,6 +117,7 @@ class MainActivity : ComponentActivity() {
 private fun MainContent(
     prefs: Prefs,
     initialDeepLinkId: String? = null,
+    initialDeepLinkToken: String? = null,
     onLogout: () -> Unit,
     onTokenExpired: () -> Unit,
 ) {
@@ -119,6 +125,9 @@ private fun MainContent(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var screen by remember { mutableStateOf(if (initialDeepLinkId != null) "approve:$initialDeepLinkId" else "home") }
+    // Only ever set from a deep link that carried a token — never reconstructed elsewhere,
+    // so an id-only entry point (e.g. a future push notification) can't approve.
+    var approveToken by remember { mutableStateOf(initialDeepLinkToken) }
 
     var approvals by remember { mutableStateOf<List<ApprovalItem>>(emptyList()) }
     var refreshTick by remember { mutableIntStateOf(0) }
@@ -261,6 +270,7 @@ private fun MainContent(
             SessionRequestApprovalScreen(
                 api = api,
                 requestId = requestId,
+                approveToken = approveToken,
                 onDone = back,
                 onLogout = onTokenExpired,
             )

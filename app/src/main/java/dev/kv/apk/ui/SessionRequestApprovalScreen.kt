@@ -33,7 +33,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.kv.apk.data.ApproveSessionRequestBody
-import dev.kv.apk.data.BASE_URL
 import dev.kv.apk.data.KvApi
 import dev.kv.apk.data.SessionRequestDetails
 import dev.kv.apk.ui.theme.KvAccent
@@ -66,6 +65,7 @@ private fun closestDuration(hours: Long?): DurationOpt {
 fun SessionRequestApprovalScreen(
     api: KvApi,
     requestId: String,
+    approveToken: String?,
     onDone: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -189,14 +189,19 @@ fun SessionRequestApprovalScreen(
                                 )
                             }
 
-                            KvLabel("REQUEST LINK (compare against what your device is showing)")
-                            Text(
-                                "${BASE_URL}admin/session-request.html?id=$requestId",
-                                fontFamily = VT323,
-                                fontSize = 13.sp,
-                                color = Color(0xFF93c5fd),
-                                modifier = Modifier.padding(bottom = 14.dp),
-                            )
+                            if (approveToken == null) {
+                                Text(
+                                    "⚠️ No approval token in this link — this screen was opened " +
+                                        "from a bare notification, not from the requesting " +
+                                        "device. You cannot approve from here; scan the QR " +
+                                        "code (or open the link) the requesting device itself " +
+                                        "shows. You can still reject.",
+                                    fontFamily = VT323,
+                                    fontSize = 14.sp,
+                                    color = KvDanger,
+                                    modifier = Modifier.padding(bottom = 14.dp),
+                                )
+                            }
 
                             KvLabel("REQUESTED AT")
                             Text(
@@ -298,16 +303,17 @@ fun SessionRequestApprovalScreen(
                                 )
                                 KvButton(
                                     text = "APPROVE",
-                                    enabled = !actionLoading && d.isOwnDevice,
+                                    enabled = !actionLoading && d.isOwnDevice && approveToken != null,
                                     modifier = Modifier.weight(1f),
                                     onClick = {
+                                        val currentToken = approveToken ?: return@KvButton
                                         scope.launch {
                                             actionLoading = true
                                             actionError = null
                                             try {
                                                 val resp = api.approveSessionRequest(
                                                     requestId,
-                                                    ApproveSessionRequestBody(selectedDuration.hours),
+                                                    ApproveSessionRequestBody(selectedDuration.hours, currentToken),
                                                 )
                                                 if (resp.isSuccessful) {
                                                     result = "Approved! Token valid for ${selectedDuration.label}."
