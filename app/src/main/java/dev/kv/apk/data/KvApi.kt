@@ -4,6 +4,7 @@ import com.google.gson.JsonObject
 import com.google.gson.annotations.SerializedName
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -259,6 +260,12 @@ interface KvApi {
 
     @GET("api/admin/kv")
     suspend fun listKvEntries(): List<KvEntryItem>
+
+    // Plaintext value of a non-device-encrypted, non-zero-trust entry (raw text/plain body).
+    // Server returns 403 for device-encrypted / zero-trust entries, which must be decrypted
+    // client-side instead.
+    @GET("api/admin/kv/{key}/value")
+    suspend fun getKvValue(@Path("key") key: String): Response<ResponseBody>
 
     @POST("api/admin/kv")
     suspend fun setKvEntry(@Body body: CreateKvRequest): Response<Unit>

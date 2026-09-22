@@ -3,6 +3,7 @@ package dev.kv.apk.ui
 import android.util.Base64
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +29,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,6 +70,10 @@ import javax.crypto.KeyAgreement
 import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+
+// A revealed entry value shown in the plaintext dialog. `isError` distinguishes a real
+// plaintext (maskable, copyable) from an error/status message (shown as-is, no copy).
+private data class RevealedValue(val text: String, val isError: Boolean)
 
 // HKDF-SHA256
 
@@ -372,8 +379,8 @@ fun KvEntriesScreen(
 
     var importText by remember { mutableStateOf("") }
 
-    // Decrypted values: key → plaintext (or error string)
-    var decryptedValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    // Revealed values: key → plaintext (or error message) shown in the plaintext dialog
+    var decryptedValues by remember { mutableStateOf<Map<String, RevealedValue>>(emptyMap()) }
     var decryptingKey by remember { mutableStateOf<String?>(null) }
 
     // Manage device access dialog
@@ -654,19 +661,42 @@ fun KvEntriesScreen(
                                         dekNonce = payload.recipient.dekNonce,
                                         encryptedDek = payload.recipient.encryptedDek,
                                     )
-                                    decryptedValues = decryptedValues + (entry.key to plaintext)
+                                    decryptedValues = decryptedValues + (entry.key to RevealedValue(plaintext, false))
                                 } catch (e: retrofit2.HttpException) {
                                     if (e.code() == 401) onLogout()
-                                    else if (e.code() == 404) decryptedValues = decryptedValues + (entry.key to
-                                        "This device no longer has access to this entry.\nAnother authorized device must re-grant access via the DEVICES button.")
-                                    else decryptedValues = decryptedValues + (entry.key to "error ${e.code()}")
+                                    else if (e.code() == 404) decryptedValues = decryptedValues + (entry.key to RevealedValue(
+                                        "This device no longer has access to this entry.\nAnother authorized device must re-grant access via the DEVICES button.", true))
+                                    else decryptedValues = decryptedValues + (entry.key to RevealedValue("error ${e.code()}", true))
                                 } catch (e: Exception) {
-                                    decryptedValues = decryptedValues + (entry.key to "decrypt failed: ${e.message}")
+                                    decryptedValues = decryptedValues + (entry.key to RevealedValue("decrypt failed: ${e.message}", true))
                                 } finally {
                                     decryptingKey = null
                                 }
                             }
                         },
+                        onReveal = {
+                            scope.launch {
+                                decryptingKey = entry.key
+                                try {
+                                    val resp = api.getKvValue(entry.key)
+                                    if (resp.isSuccessful) {
+                                        val value = resp.body()?.string() ?: ""
+                                        decryptedValues = decryptedValues + (entry.key to RevealedValue(value, false))
+                                    } else when (resp.code()) {
+                                        401 -> onLogout()
+                                        403 -> decryptedValues = decryptedValues + (entry.key to RevealedValue(
+                                            "This entry can't be shown here — it is device-encrypted or zero-trust.", true))
+                                        404 -> decryptedValues = decryptedValues + (entry.key to RevealedValue("not found", true))
+                                        else -> decryptedValues = decryptedValues + (entry.key to RevealedValue("error ${resp.code()}", true))
+                                    }
+                                } catch (e: Exception) {
+                                    decryptedValues = decryptedValues + (entry.key to RevealedValue(e.message ?: "failed", true))
+                                } finally {
+                                    decryptingKey = null
+                                }
+                            }
+                        },
+                        onCopied = { toast = "copied ${entry.key}" },
                         onDismissDecrypted = {
                             decryptedValues = decryptedValues - entry.key
                         },
@@ -822,15 +852,19 @@ fun KvEntriesScreen(
 @Composable
 private fun EntryRow(
     item: KvEntryItem,
-    decryptedValue: String?,
+    decryptedValue: RevealedValue?,
     isDecrypting: Boolean,
     canDecrypt: Boolean,
     onDecrypt: () -> Unit,
+    onReveal: () -> Unit,
+    onCopied: () -> Unit,
     onDismissDecrypted: () -> Unit,
     onManageDevices: () -> Unit,
 ) {
-    // Dialog showing the decrypted plaintext
+    // Dialog showing the revealed plaintext (or an error message)
     if (decryptedValue != null) {
+        val clipboard = LocalClipboardManager.current
+        var revealed by remember(decryptedValue) { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = onDismissDecrypted,
             title = {
@@ -844,7 +878,7 @@ private fun EntryRow(
             text = {
                 Column {
                     Text(
-                        "PLAINTEXT",
+                        if (decryptedValue.isError) "ERROR" else "PLAINTEXT",
                         fontFamily = PressStart2P,
                         fontSize = 7.sp,
                         color = KvDim,
@@ -857,17 +891,42 @@ private fun EntryRow(
                             .border(1.dp, KvFaint, RoundedCornerShape(3.dp))
                             .padding(10.dp),
                     ) {
+                        val display = when {
+                            decryptedValue.isError -> decryptedValue.text
+                            revealed -> decryptedValue.text
+                            else -> "•".repeat(decryptedValue.text.length.coerceIn(1, 32))
+                        }
                         Text(
-                            decryptedValue,
+                            display,
                             fontFamily = VT323,
                             fontSize = 17.sp,
-                            color = KvInk,
+                            color = if (decryptedValue.isError) KvDanger else KvInk,
                         )
                     }
                 }
             },
             confirmButton = {
-                KvButton(text = "CLOSE", onClick = onDismissDecrypted)
+                if (decryptedValue.isError) {
+                    KvButton(text = "CLOSE", onClick = onDismissDecrypted)
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        KvButtonOutline(
+                            text = if (revealed) "HIDE" else "SHOW",
+                            onClick = { revealed = !revealed },
+                            color = KvAccent,
+                        )
+                        KvButton(
+                            text = "COPY",
+                            onClick = {
+                                clipboard.setText(AnnotatedString(decryptedValue.text))
+                                onCopied()
+                            },
+                        )
+                    }
+                }
+            },
+            dismissButton = if (decryptedValue.isError) null else {
+                { KvButtonOutline(text = "CLOSE", onClick = onDismissDecrypted) }
             },
             containerColor = Color(0xFF0C120C),
             titleContentColor = KvAccent,
@@ -875,9 +934,14 @@ private fun EntryRow(
         )
     }
 
+    // Regular entries reveal their value on tap; device-encrypted ones use the buttons below.
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (!item.deviceEncrypted && !isDecrypting) Modifier.clickable(onClick = onReveal)
+                else Modifier
+            )
             .padding(horizontal = 4.dp, vertical = 12.dp),
     ) {
         Row(
@@ -944,6 +1008,14 @@ private fun EntryRow(
                     color = KvDim,
                 )
             }
+        } else {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (isDecrypting) "…" else "TAP TO SHOW VALUE",
+                fontFamily = VT323,
+                fontSize = 14.sp,
+                color = KvDim,
+            )
         }
     }
 
