@@ -47,6 +47,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default package list includes the legacy "tools" package, which
+          # Google removed from the SDK repository — installing it now fails the whole step.
+          # Only platform-tools is needed; AGP fetches the platform/build-tools it wants.
+          packages: 'platform-tools'
 
       - name: Download logo
         run: |
