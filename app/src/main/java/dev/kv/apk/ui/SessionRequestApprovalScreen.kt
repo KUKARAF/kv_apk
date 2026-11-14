@@ -65,7 +65,6 @@ private fun closestDuration(hours: Long?): DurationOpt {
 fun SessionRequestApprovalScreen(
     api: KvApi,
     requestId: String,
-    approveToken: String?,
     onDone: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -78,6 +77,8 @@ fun SessionRequestApprovalScreen(
     var actionLoading by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
     var actionError by remember { mutableStateOf<String?>(null) }
+    // Typed by the admin from the requesting device's screen — never taken from a link/QR.
+    var approvalCode by remember { mutableStateOf("") }
 
     LaunchedEffect(requestId) {
         try {
@@ -189,19 +190,21 @@ fun SessionRequestApprovalScreen(
                                 )
                             }
 
-                            if (approveToken == null) {
-                                Text(
-                                    "⚠️ No approval token in this link — this screen was opened " +
-                                        "from a bare notification, not from the requesting " +
-                                        "device. You cannot approve from here; scan the QR " +
-                                        "code (or open the link) the requesting device itself " +
-                                        "shows. You can still reject.",
-                                    fontFamily = VT323,
-                                    fontSize = 14.sp,
-                                    color = KvDanger,
-                                    modifier = Modifier.padding(bottom = 14.dp),
-                                )
-                            }
+                            KvLabel("APPROVAL CODE")
+                            KvInput(
+                                value = approvalCode,
+                                onValueChange = { approvalCode = it },
+                                placeholder = "shown on the requesting device",
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                            )
+                            Text(
+                                "Enter the code displayed on the device that made this request. " +
+                                    "It is not part of the link or QR. Reject works without it.",
+                                fontFamily = VT323,
+                                fontSize = 14.sp,
+                                color = KvDim,
+                                modifier = Modifier.padding(bottom = 14.dp),
+                            )
 
                             KvLabel("REQUESTED AT")
                             Text(
@@ -303,10 +306,11 @@ fun SessionRequestApprovalScreen(
                                 )
                                 KvButton(
                                     text = "APPROVE",
-                                    enabled = !actionLoading && d.isOwnDevice && approveToken != null,
+                                    enabled = !actionLoading && d.isOwnDevice && approvalCode.isNotBlank(),
                                     modifier = Modifier.weight(1f),
                                     onClick = {
-                                        val currentToken = approveToken ?: return@KvButton
+                                        val currentToken = approvalCode.trim()
+                                        if (currentToken.isEmpty()) return@KvButton
                                         scope.launch {
                                             actionLoading = true
                                             actionError = null
@@ -319,6 +323,8 @@ fun SessionRequestApprovalScreen(
                                                     result = "Approved! Token valid for ${selectedDuration.label}."
                                                 } else if (resp.code() == 403) {
                                                     actionError = "You don't have permission to approve this device's request."
+                                                } else if (resp.code() == 404) {
+                                                    actionError = "Wrong approval code, or the request expired."
                                                 } else {
                                                     result = "Error: HTTP ${resp.code()}"
                                                 }

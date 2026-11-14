@@ -384,9 +384,9 @@ interface KvApi {
 
 data class ApproveSessionRequestBody(
     @SerializedName("approved_duration_hours") val approvedDurationHours: Long,
-    // Must match the approve_token returned to the requester at creation time — never
-    // derivable from a bare notification/deep-link id, only from the requesting device's
-    // own link/QR. Without it the server rejects the approve with 404.
+    // Must match the approve_token returned to the requester at creation time. The admin types
+    // it in from the requesting device's screen — it is never in a link/QR/notification.
+    // Without it the server rejects the approve with 404.
     val token: String,
 )
 
@@ -430,7 +430,7 @@ data class CreateChallengeResponse(
 
 data class CreateSessionRequestResponse(
     val id: String,
-    // Includes approve_token as a `token` query param — same value as approveToken below.
+    // Approval page link (id only; does not contain the approve token).
     val url: String,
     @SerializedName("expires_at") val expiresAt: String,
     // Secret held only by this requester; required to poll for the session token.

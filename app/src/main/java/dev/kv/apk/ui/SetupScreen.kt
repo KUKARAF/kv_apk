@@ -114,6 +114,8 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
     var selectedDuration by remember { mutableStateOf(DURATION_OPTIONS[1]) } // 30 days default
     var durationMenuExpanded by remember { mutableStateOf(false) }
     var approvalUrl by remember { mutableStateOf("") }
+    // Shown only on this (requesting) device; the admin must type it into the approval screen.
+    var approvalCode by remember { mutableStateOf("") }
     var requestId by remember { mutableStateOf("") }
     var pollSecret by remember { mutableStateOf("") }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -390,16 +392,16 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                                                     )
                                                 )
                                                 approvalUrl = result.url
+                                                approvalCode = result.approveToken
                                                 // Set the secret before requestId so the polling
                                                 // LaunchedEffect(requestId) has it on first tick.
                                                 pollSecret = result.pollSecret
                                                 requestId = result.id
                                                 // QR encodes the deep link so the KV app opens directly on scan.
-                                                // Must include the approve token — this QR is the only
-                                                // channel that carries it to the approving admin; a bare
-                                                // id (e.g. from a push notification) must never be enough.
-                                                val deepLink = "kvapp://session-request?id=${result.id}" +
-                                                    "&token=${Uri.encode(result.approveToken)}"
+                                                // The QR carries the id only. The approve token is shown
+                                                // separately as an approval code the admin must type in —
+                                                // a link/QR/notification alone must never be enough.
+                                                val deepLink = "kvapp://session-request?id=${result.id}"
                                                 qrBitmap = runCatching { urlToQrBitmap(deepLink) }.getOrNull()
                                                 phase = SetupPhase.WAITING
                                             } catch (e: Exception) {
@@ -464,6 +466,23 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
 
                             Spacer(Modifier.height(14.dp))
 
+                            KvLabel("APPROVAL CODE")
+                            Text(
+                                approvalCode,
+                                fontFamily = VT323,
+                                fontSize = 14.sp,
+                                color = KvAccent,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            )
+                            Text(
+                                "The admin must enter this code to approve. It is not in the QR or link.",
+                                fontFamily = VT323,
+                                fontSize = 13.sp,
+                                color = KvDim,
+                            )
+
+                            Spacer(Modifier.height(14.dp))
+
                             Text(
                                 approvalUrl,
                                 fontFamily = VT323,
@@ -509,6 +528,7 @@ fun SetupScreen(prefs: Prefs, onSetupComplete: () -> Unit) {
                                 onClick = {
                                     requestId = ""
                                     approvalUrl = ""
+                                    approvalCode = ""
                                     qrBitmap = null
                                     error = null
                                     phase = SetupPhase.FORM
